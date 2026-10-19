@@ -1,0 +1,50 @@
+name: Platform checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Test portable core (no hardware)
+        run: dotnet test tests/CellPort.Core.Tests/CellPort.Core.Tests.csproj -c Release --nologo
+      - name: Build portable serial transport
+        run: dotnet build src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj -c Release --nologo
+
+  windows-hosts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Build all Windows hosts
+        run: dotnet build CellPort.sln -c Release --nologo
+      - name: Publish framework-dependent
+        run: dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained false -o dist/platform-check/framework-dependent
+      - name: Publish self-contained
+        run: dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained true -o dist/platform-check/self-contained
+      - name: Verify platform assemblies are packaged
+        shell: pwsh
+        run: |
+          foreach ($flavor in @('framework-dependent', 'self-contained')) {
+            foreach ($assembly in @('CellPort.Core.dll', 'CellPort.Platform.Windows.dll', 'CellPort.Transport.Serial.dll')) {
+              if (!(Test-Path "dist/platform-check/$flavor/$assembly")) {
+                throw "Missing $assembly in $flavor"
+              }
+            }
+          }
