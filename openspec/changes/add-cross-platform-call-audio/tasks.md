@@ -6,52 +6,52 @@
 
 ## 1. 固定行为契约和设备基线
 
-- [ ] 1.1 在 docs/audio 建立六 capability 与测试用例映射表；验证每个 Requirement 和 Scenario 均有对应自动测试或明确真机验收项。
-- [ ] 1.2 将 design.md 的两条 mode=1 CLCC、ADB 问号 serial 和 USB 原值制作脱敏 fixture；验证不包含真实号码、boot ID、设备 serial 或 owner token。
-- [ ] 1.3 定义 protocol v1 JSON schema、错误码和状态转换表；验证有效/无效消息、64 KiB 限制与未知主版本样例符合规则。
-- [ ] 1.4 建立兼容/验收记录模板，包含 OS/CPU、完整固件、库/组件摘要、支持等级和未验证项；验证当前设备仅记为候选而非已支持。
+- [x] 1.1 在 docs/audio 建立六 capability 与测试用例映射表；验证每个 Requirement 和 Scenario 均有对应自动测试或明确真机验收项。
+- [x] 1.2 将 design.md 的两条 mode=1 CLCC、ADB 问号 serial 和 USB 原值制作脱敏 fixture；验证不包含真实号码、boot ID、设备 serial 或 owner token。
+- [x] 1.3 定义 protocol v1 JSON schema、错误码和状态转换表；验证有效/无效消息、64 KiB 限制与未知主版本样例符合规则。
+- [x] 1.4 建立兼容/验收记录模板，包含 OS/CPU、完整固件、库/组件摘要、支持等级和未验证项；验证当前设备仅记为候选而非已支持。
 
 ## 2. .NET 和平台边界迁移
 
 本组依赖 `isolate-platform-dependencies` 的隔离实现和离线兼容验证；本组仍承担 .NET 10 升级，不将前置完成误记为音频能力完成。
 
-- [ ] 2.1 将现有应用、工具、测试及 CI SDK 迁移到 .NET 10，保持 Windows 行为；验证现有五类测试通过且 Windows framework/self-contained 包均能构建。
-- [ ] 2.2 接入前置 change 提供的 IAtChannelProvider/Platform.Windows/Transport.Serial，验证 .NET 10 升级后平台依赖检查和既有连接回归仍通过；新增音频设备操作仅进入对应平台层。
-- [ ] 2.3 新建 Audio.Core 的会话/设备/运行时/媒体接口与不可变结果模型；验证接口程序集和纯逻辑测试可在 Windows、Linux、macOS 构建。
-- [ ] 2.4 在前置宿主装配基础上更新音频项目引用、.NET 10 运行时提示与 installer/打包文档；验证旧 Windows 调用入口和启动路径无回归，非 Windows 构建不引用 WPF。
+- [x] 2.1 将现有应用、工具、测试及 CI SDK 迁移到 .NET 10，保持 Windows 行为；验证现有五类测试通过且 Windows framework/self-contained 包均能构建。
+- [x] 2.2 接入前置 change 提供的 IAtChannelProvider/Platform.Windows/Transport.Serial，验证 .NET 10 升级后平台依赖检查和既有连接回归仍通过；新增音频设备操作仅进入对应平台层。
+- [x] 2.3 新建 Audio.Core 的会话/设备/运行时/媒体接口与不可变结果模型；验证接口程序集和纯逻辑测试可在 Windows、Linux、macOS 构建。
+- [x] 2.4 在前置宿主装配基础上更新音频项目引用、.NET 10 运行时提示与 installer/打包文档；验证旧 Windows 调用入口和启动路径无回归，非 Windows 构建不引用 WPF。
 
 ## 3. CLCC 和呼叫状态
 
-- [ ] 3.1 实现 CLCC 全列表解析与 query outcome；用 fixture 验证两个 active 数据条目不变成语音 Active，空 OK 与 ERROR/损坏明确区分。
-- [ ] 3.2 实现 CallTracker 和 module/call generation；测试 index 复用、混合语音/数据、held、waiting、多路和断链后无法证明连续性的情况。
-- [ ] 3.3 将 Dial/Answer/HangUp 命令结果与网络状态分离；测试 ATA OK 不自动开媒体、CHUP 失败仍显示挂断未确认、失败不自动重拨。
-- [ ] 3.4 增加 AT 优先级队列与独立三秒新鲜度门控；测试 URC 不重入、长命令不被中途插入、排队超时仍能关闭上行且无死锁。
-- [ ] 3.5 修正呼叫方向与确认 active 起算时长，保留兼容事件入口；验证呼出从 Active 结束仍记录为呼出，未接通不计已接通时长。
-- [ ] 3.6 补充呼叫状态文档和用户可见未知/仅控制说明；通过快照测试验证 UI 文案不将数据条目或命令 OK 描述为语音已接通。
+- [x] 3.1 实现 CLCC 全列表解析与 query outcome；用 fixture 验证两个 active 数据条目不变成语音 Active，空 OK 与 ERROR/损坏明确区分。
+- [x] 3.2 实现 CallTracker 和 module/call generation；测试 index 复用、混合语音/数据、held、waiting、多路和断链后无法证明连续性的情况。
+- [x] 3.3 将 Dial/Answer/HangUp 命令结果与网络状态分离；测试 ATA OK 不自动开媒体、CHUP 失败仍显示挂断未确认、失败不自动重拨。
+- [x] 3.4 增加 AT 优先级队列与独立三秒新鲜度门控；测试 URC 不重入、长命令不被中途插入、排队超时仍能关闭上行且无死锁。
+- [x] 3.5 修正呼叫方向与确认 active 起算时长，保留兼容事件入口；验证呼出从 Active 结束仍记录为呼出，未接通不计已接通时长。
+- [x] 3.6 补充呼叫状态文档和用户可见未知/仅控制说明；通过快照测试验证 UI 文案不将数据条目或命令 OK 描述为语音已接通。
 
 ## 4. 设备身份与只读诊断
 
-- [ ] 4.1 实现 Windows USB 父节点、LocationPaths、ContainerId 与接口映射；用双设备/同名 fixture 验证拒绝歧义且不固化 COM8/MI_02。
-- [ ] 4.2 实现指定 transport 的 ADB 调用及无效 serial 处理；测试问号/重复 serial、transport ID 变化、多个候选和控制通道超时，不使用默认第一台设备。
-- [ ] 4.3 增加 PnP 重枚举与 boot/token 重验，清除旧扫描缓存/句柄；测试同口替代、换口、旧 boot 恢复和迟到异步结果被拒绝。
-- [ ] 4.4 实现独立 inspect 命令，不走 ModemManager 的写入初始化；用命令记录测试确认只有读取/查询，当前设备无空列表时报告 DEVICE_BUSY_DATA 而不挂断。
-- [ ] 4.5 实现脱敏诊断输出并记录 ADB 工具/模块构建/厂商库指纹；验证 export 不含 PCM、号码、密钥，且缺少 getprop/os-release 不被误判为设备不可用。
+- [x] 4.1 实现 Windows USB 父节点、LocationPaths、ContainerId 与接口映射；用双设备/同名 fixture 验证拒绝歧义且不固化 COM8/MI_02。
+- [x] 4.2 实现指定 transport 的 ADB 调用及无效 serial 处理；测试问号/重复 serial、transport ID 变化、多个候选和控制通道超时，不使用默认第一台设备。
+- [x] 4.3 增加 PnP 重枚举与 boot/token 重验，清除旧扫描缓存/句柄；测试同口替代、换口、旧 boot 恢复和迟到异步结果被拒绝。
+- [x] 4.4 实现独立 inspect 命令，不走 ModemManager 的写入初始化；用命令记录测试确认只有读取/查询，当前设备无空列表时报告 DEVICE_BUSY_DATA 而不挂断。
+- [x] 4.5 实现脱敏诊断输出并记录 ADB 工具/模块构建/厂商库指纹；验证 export 不含 PCM、号码、密钥，且缺少 getprop/os-release 不被误判为设备不可用。
 - [ ] 4.6 编写设备匹配与只读检查说明；按说明在当前设备执行一次只读验收，验证 USB 三字段和已加载模块列表前后不变。
 
 ## 5. 设备协议、supervisor 与模拟恢复基础
 
-- [ ] 5.1 实现 C supervisor/client 的有界协议解析和结构化结果；在宿主模拟器测试畸形输入、主版本不兼容和非法操作，禁止任意 shell payload。
-- [ ] 5.2 实现全局锁、boot/owner/generation 与进程身份验证；测试双客户端、PID 重用、带空格 proc stat 名称和未知校准服务不被终止。
-- [ ] 5.3 实现原始快照、intent/lastApplied journal 的原子写入；模拟每一步前后崩溃，验证原始快照不被重复 prepare 覆盖。
-- [ ] 5.4 实现请求 ID/内容摘要去重、sequence 与有界历史；测试应答丢失重试不重复生效，同 ID 不同内容拒绝，淘汰请求不重新执行。
-- [ ] 5.5 实现设备单调 lease、45 秒到期、一次性 120 秒准备宽限和独立续租；用可控时钟验证宿主墙钟跳变、准备超时、未知占用延期与正常释放。
-- [ ] 5.6 实现守护化/ready 握手及有界子进程/FIFO deadline；在模拟环境验证控制连接退出后仍可运行，SIGKILL 后下次连接能识别未完成账本。
-- [ ] 5.7 编写协议、所有权与恢复承诺文档；验证文档明确首版不保证 supervisor 自身强杀后的无人值守恢复，不把 shell trap 作为该保证。
+- [x] 5.1 实现 C supervisor/client 的有界协议解析和结构化结果；在宿主模拟器测试畸形输入、主版本不兼容和非法操作，禁止任意 shell payload。
+- [x] 5.2 实现全局锁、boot/owner/generation 与进程身份验证；测试双客户端、PID 重用、带空格 proc stat 名称和未知校准服务不被终止。
+- [x] 5.3 实现原始快照、intent/lastApplied journal 的原子写入；模拟每一步前后崩溃，验证原始快照不被重复 prepare 覆盖。
+- [x] 5.4 实现请求 ID/内容摘要去重、sequence 与有界历史；测试应答丢失重试不重复生效，同 ID 不同内容拒绝，淘汰请求不重新执行。
+- [x] 5.5 实现设备单调 lease、45 秒到期、一次性 120 秒准备宽限和独立续租；用可控时钟验证宿主墙钟跳变、准备超时、未知占用延期与正常释放。
+- [x] 5.6 实现守护化/ready 握手及有界子进程/FIFO deadline；在模拟环境验证控制连接退出后仍可运行，SIGKILL 后下次连接能识别未完成账本。
+- [x] 5.7 编写协议、所有权与恢复承诺文档；验证文档明确首版不保证 supervisor 自身强杀后的无人值守恢复，不把 shell trap 作为该保证。
 
 ## 6. 兼容资源和 helper 门槛 G0-B
 
-- [ ] 6.1 审查候选 ko/helper 对应源码、构建输入、修改/分发条件并记录固定来源；完成条件是可审核的资源清单，来源不足时记录阻断且不导入发布包。
-- [ ] 6.2 定义 manifest v2 与离线资源导入校验，区分候选/实验/验证状态；测试错误摘要、半文件、同名异源、未知固件/ABI和旧 v1 不自动通过。
+- [x] 6.1 审查候选 ko/helper 对应源码、构建输入、修改/分发条件并记录固定来源；完成条件是可审核的资源清单，来源不足时记录阻断且不导入发布包。
+- [x] 6.2 定义 manifest v2 与离线资源导入校验，区分候选/实验/验证状态；测试错误摘要、半文件、同名异源、未知固件/ABI和旧 v1 不自动通过。
 - [ ] 6.3 固定模块 EABI/加载器/厂商库 ABI 与交叉构建方式，构建自有 supervisor；验证 ELF/依赖信息和产物摘要可复现并写入构建文档。
 - [ ] 6.4 基于可合法使用的匹配源码实现 route-only helper 启动能力；通过模拟 USB 写入审计证明 start 不触碰 functions/enable/audio_enable，不凭旧二进制假设能力。
 - [ ] 6.5 实现 route-only helper 正常退出/路由回滚和 ready 反馈；测试 stop 无 USB 副作用、错误路径有界退出、未校准不报告 ready，生成独立新版本/摘要。
@@ -60,28 +60,28 @@
 
 ## 7. USB 会话与设备集成 G0-A/C/D
 
-- [ ] 7.1 实现 ModemManager 统一操作协调器，覆盖 eSIM/CFUN、USB 网络、控制台与音频；测试非语音占用、unknown 和相冲突请求均不绕过准备限制。
-- [ ] 7.2 实现两层会话状态与单一 supervisor USB 写入接口；测试 standby 不采集、呼叫结束只停 route、旧媒体代次不能操作新会话。
-- [ ] 7.3 实现 profile 驱动的 functions/audio_enable/enable 事务与 exact restore；模拟原含 audio、原 enable=0/audio_enable=1、外部改写、重复 release 和 boot 变化。
-- [ ] 7.4 实现计划内重枚举和分层重连 deadline；测试 USB 写入已完成但 ADB 应答丢失、disable 后失联时有界本地收敛、AT 先回 UAC 后回及来电竞态，不发生无限重连或等待不可达宿主的空闲证明。
-- [ ] 7.5 实现 stop-media 与 restore-pending 分离及恢复回执；测试无独立空闲证据时保留延期、数据占用不自动挂断、恢复后失去 ADB 不伪报成功。
+- [x] 7.1 实现 ModemManager 统一操作协调器，覆盖 eSIM/CFUN、USB 网络、控制台与音频；测试非语音占用、unknown 和相冲突请求均不绕过准备限制。
+- [x] 7.2 实现两层会话状态与单一 supervisor USB 写入接口；测试 standby 不采集、呼叫结束只停 route、旧媒体代次不能操作新会话。
+- [x] 7.3 实现 profile 驱动的 functions/audio_enable/enable 事务与 exact restore；模拟原含 audio、原 enable=0/audio_enable=1、外部改写、重复 release 和 boot 变化。
+- [x] 7.4 实现计划内重枚举和分层重连 deadline；测试 USB 写入已完成但 ADB 应答丢失、disable 后失联时有界本地收敛、AT 先回 UAC 后回及来电竞态，不发生无限重连或等待不可达宿主的空闲证明。
+- [x] 7.5 实现 stop-media 与 restore-pending 分离及恢复回执；测试无独立空闲证据时保留延期、数据占用不自动挂断、恢复后失去 ADB 不伪报成功。
 - [ ] 7.6 在用户安排的空闲窗口重读 CLCC 并完成 G0-A 检查后，通过显式实验入口验证 supervisor 脱离 ADB、运行时校准、USB 描述符和双向端点（候选 profile 不标为 supported）；记录 G0-C/D，任一前提不满足停止本项，不自动清除当前数据条目。
 - [ ] 7.7 对已验证顺序执行至少 10 次准备/原样恢复并记录 AT/ADB/网络接口前后状态；验证无误绑定、无遗留 owned 进程且恢复字段完全一致。
-- [ ] 7.8 补充 Windows 数据占用、准备网络中断与恢复失败操作指南；通过一次故障演练确认日志能区分已停音频、待恢复和已恢复。
+- [x] 7.8 补充 Windows 数据占用、准备网络中断与恢复失败操作指南；通过一次故障演练确认日志能区分已停音频、待恢复和已恢复。
 
 ## 8. Windows 媒体后端
 
-- [ ] 8.1 实现 MMDevice→USB 父设备关联和四端点枚举；测试同名设备、系统默认指向模块和端点失效，验证不改变系统默认、不改绑 UAC 驱动。
+- [x] 8.1 实现 MMDevice→USB 父设备关联和四端点枚举；测试同名设备、系统默认指向模块和端点失效，验证不改变系统默认、不改绑 UAC 驱动。
 - [ ] 8.2 实现 WASAPI shared event-driven 捕获/播放及格式协商；用软件回环验证 float/PCM、44.1/48/8 kHz、变长回调和不支持格式错误。
-- [ ] 8.3 实现带滤波重采样、声道转换、预分配环形队列和 120 ms 上限；测试欠载/过载计数、过旧数据丢弃和回调无阻塞控制调用。
-- [ ] 8.4 实现时钟漂移控制与媒体健康统计；使用 ±100/300 ppm 和一方向停止测试，验证水位有界、零样本不误报、停流一秒关闭上行。
-- [ ] 8.5 实现初始静音/权限门控、AT 静音失败时宿主静音、两次重建上限与代次清理；测试启动中挂断、快速重拨、旧回调、权限撤销和耳机拔除。
+- [x] 8.3 实现带滤波重采样、声道转换、预分配环形队列和 120 ms 上限；测试欠载/过载计数、过旧数据丢弃和回调无阻塞控制调用。
+- [x] 8.4 实现时钟漂移控制与媒体健康统计；使用 ±100/300 ppm 和一方向停止测试，验证水位有界、零样本不误报、停流一秒关闭上行。
+- [x] 8.5 实现初始静音/权限门控、AT 静音失败时宿主静音、两次重建上限与代次清理；测试启动中挂断、快速重拨、旧回调、权限撤销和耳机拔除。
 - [ ] 8.6 在 G0/USB 验证后进行 Windows 耳机呼入/呼出双向验收，用户明确操作测试号码；记录双方可听、静音、无逐通话重枚举与本地延迟，不以非零样本代替结论。
-- [ ] 8.7 编写媒体指标和耳机/免提/蓝牙支持说明；验证仅耳机通过时免提/蓝牙仍标未验证，不宣称未经测试的 AEC 能力。
+- [x] 8.7 编写媒体指标和耳机/免提/蓝牙支持说明；验证仅耳机通过时免提/蓝牙仍标未验证，不宣称未经测试的 AEC 能力。
 
 ## 9. Windows 界面和生命周期接入
 
-- [ ] 9.1 接入 CallsPage 的确认呼叫状态、音频待机/媒体/恢复状态和仅控制路径；用状态快照测试覆盖数据占用、挂断未确认、未就绪来电和缺资源。
+- [x] 9.1 接入 CallsPage 的确认呼叫状态、音频待机/媒体/恢复状态和仅控制路径；用状态快照测试覆盖数据占用、挂断未确认、未就绪来电和缺资源。
 - [ ] 9.2 接入本地设备选择、宿主静音、准备/释放/重试入口；测试释放不隐式 CHUP、默认设备变化先静音、权限拒绝不反复弹窗。
 - [ ] 9.3 接入应用退出、睡眠/唤醒和异常断链；集成测试验证旧会话不盲目续播，无法确认空闲时显示延期而非已恢复。
 - [ ] 9.4 更新用户指南和恢复入口，保留运行时回滚工具；演练失败 journal 的导出与重连恢复，不删除未确认恢复的资源目录。
@@ -96,9 +96,9 @@
 
 ## 11. macOS / CellDock 互操作交付
 
-- [ ] 11.1 输出版本化协议/状态/错误/CLCC 与恢复测试向量，以及 Swift 接入所需的类型中立说明；验证材料不含 Windows 句柄或 CLR 专有类型。
-- [ ] 11.2 编写 CellDock ModuleVoiceRuntime、ModuleAudioSession、CUACProbe、VoiceAudioService 的接入映射与 macOS 权限/USB 父身份验收步骤；复核不假设旧 helper 支持新 ABI。
-- [ ] 11.3 使用协议模拟客户端核验跨客户端 owner 竞争与版本拒绝；文档记录外部 CellDock 实现/真机回执状态，缺少回执时明确标为外部待接入，不在本仓库修改外部源文件。
+- [x] 11.1 输出版本化协议/状态/错误/CLCC 与恢复测试向量，以及 Swift 接入所需的类型中立说明；验证材料不含 Windows 句柄或 CLR 专有类型。
+- [x] 11.2 编写 CellDock ModuleVoiceRuntime、ModuleAudioSession、CUACProbe、VoiceAudioService 的接入映射与 macOS 权限/USB 父身份验收步骤；复核不假设旧 helper 支持新 ABI。
+- [x] 11.3 使用协议模拟客户端核验跨客户端 owner 竞争与版本拒绝；文档记录外部 CellDock 实现/真机回执状态，缺少回执时明确标为外部待接入，不在本仓库修改外部源文件。
 
 ## 12. 跨层验收与发布
 

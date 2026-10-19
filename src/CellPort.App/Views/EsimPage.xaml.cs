@@ -176,20 +176,7 @@ public partial class EsimPage : UserControl, IModuleAware
 
         try
         {
-            var es10 = _modem.Info.Es10;
-            if (es10 is null)
-            {
-                MessageBox.Show("eUICC 通道未就绪，请先点「读取」完成探测。", "无法切换",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            if (es10.Channel <= 0)
-            {
-                await es10.OpenIsdrAsync();
-            }
-
-            var r = await es10.SetProfileStateAsync(p.IsdpAid!, enable);
+            var r = await _modem.SetEsimProfileStateAsync(p.IsdpAid!, enable);
             if (!r.Ok)
             {
                 MessageBox.Show(

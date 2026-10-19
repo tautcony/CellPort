@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using CellPort.Audio.Core.Resources;
+using CellPort.Audio.Core.Services;
 using CellPort.Core.Services;
 
 namespace CellPort.App.Views;
@@ -10,23 +12,38 @@ namespace CellPort.App.Views;
 public partial class CallsPage : UserControl, IModuleAware
 {
     private ModemManager? _modem;
+    private CallService? _attachedCallService;
+    private readonly AudioSessionLifecycle _audioSessionLifecycle;
+    private readonly RuntimeAudioAvailability _audioAvailability;
     private bool _muted;
+    private string? _incomingNumber;
+    private const string HiddenValue = "••••••";
 
     public CallsPage()
+        : this(new AudioSessionLifecycle())
     {
+    }
+
+    public CallsPage(AudioSessionLifecycle audioSessionLifecycle)
+    {
+        _audioSessionLifecycle = audioSessionLifecycle ?? throw new ArgumentNullException(nameof(audioSessionLifecycle));
+        _audioAvailability = RuntimeAudioAvailability.Evaluate(profile: null, hostBackendAvailable: false);
         InitializeComponent();
         BuildKeypad();
+        _audioSessionLifecycle.StateChanged += OnAudioSessionChanged;
+        AppSettings.SettingsChanged += OnSettingsChanged;
+        AudioAvailabilityText.Text = _audioAvailability.StatusText;
+        AudioSessionText.Text = "通话控制可用；媒体通路不可用（仅控制）";
     }
 
     public void OnActivated(ModemManager modem)
     {
-        if (ReferenceEquals(_modem, modem))
+        if (!ReferenceEquals(_modem, modem))
         {
-            return;
+            Detach();
+            _modem = modem;
         }
 
-        Detach();
-        _modem = modem;
         Attach();
         ReloadHistory();
         UpdateState();
@@ -35,25 +52,63 @@ public partial class CallsPage : UserControl, IModuleAware
     public void OnConnectionChanged(bool connected) => Dispatcher.Invoke(() =>
     {
         DialButton.IsEnabled = connected;
+        if (connected)
+        {
+            Attach();
+        }
+        else
+        {
+            Detach();
+        }
+        ReloadHistory();
         UpdateState();
     });
 
     private void Attach()
     {
-        if (_modem?.Calls is not null)
+        var service = _modem?.Calls;
+        if (ReferenceEquals(service, _attachedCallService))
         {
-            _modem.Calls.StateChanged += OnCallStateChanged;
-            _modem.Calls.IncomingCall += OnIncomingCall;
+            return;
+        }
+
+        Detach();
+        _attachedCallService = service;
+        if (_attachedCallService is not null)
+        {
+            _attachedCallService.StateChanged += OnCallStateChanged;
+            _attachedCallService.IncomingCall += OnIncomingCall;
         }
     }
 
     private void Detach()
     {
-        if (_modem?.Calls is not null)
+        if (_attachedCallService is not null)
         {
-            _modem.Calls.StateChanged -= OnCallStateChanged;
-            _modem.Calls.IncomingCall -= OnIncomingCall;
+            _attachedCallService.StateChanged -= OnCallStateChanged;
+            _attachedCallService.IncomingCall -= OnIncomingCall;
+            _attachedCallService = null;
         }
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            if (_incomingNumber is not null &&
+                (DialNumberBox.Text == HiddenValue || DialNumberBox.Text == _incomingNumber))
+            {
+                DialNumberBox.Text = DisplayNumber(_incomingNumber);
+            }
+
+            ReloadHistory();
+            UpdateState();
+        });
     }
 
     private void OnCallStateChanged(object? sender, CallState state)
@@ -69,25 +124,37 @@ public partial class CallsPage : UserControl, IModuleAware
     {
         Dispatcher.Invoke(() =>
         {
-            DialNumberBox.Text = number;
-            CallStateText.Text = $"来电：{number}";
+            _incomingNumber = number;
+            DialNumberBox.Text = DisplayNumber(number);
+            CallStateText.Text = $"来电：{DisplayNumber(number)}";
         });
     }
 
     private void UpdateState()
     {
         var state = _modem?.Calls?.State ?? CallState.Idle;
-        CallStateText.Text = state switch
-        {
-            CallState.Idle => "空闲",
-            CallState.Dialing => "拨号中…",
-            CallState.Ringing => "响铃",
-            CallState.Active => $"通话中{(string.IsNullOrEmpty(_modem?.Calls?.PeerNumber) ? "" : $" · {_modem!.Calls!.PeerNumber}")}",
-            _ => "已结束",
-        };
+        var status = CallStatePresentation.GetStatusText(_modem?.Calls);
+        var peer = _modem?.Calls?.PeerNumber;
+        CallStateText.Text = _modem?.Calls?.CurrentSnapshot.SelectedVoiceCall is not null
+            && !string.IsNullOrEmpty(peer)
+            ? $"{status} · {DisplayNumber(peer)}"
+            : status;
 
-        HangupButton.IsEnabled = state is not CallState.Idle;
+        HangupButton.IsEnabled = state is CallState.Dialing or CallState.Ringing or CallState.Active
+            or CallState.Held or CallState.HangupPending or CallState.HangupUnconfirmed;
         AnswerButton.IsEnabled = state == CallState.Ringing;
+        var snapshot = _modem?.Calls?.CurrentSnapshot ?? new CallSnapshot(
+            ClccQueryOutcome.TransportFailure, false, 0, 0,
+            System.Collections.Immutable.ImmutableArray<TrackedCall>.Empty, null, 0);
+        var ui = CallAudioUiSnapshot.Create(state, snapshot, _audioAvailability, _audioSessionLifecycle.Diagnostic);
+        AudioAvailabilityText.Text = ui.AudioStateText;
+        AudioSessionText.Text = ui.MediaPathText;
+    }
+
+    private void OnAudioSessionChanged(object? sender, AudioSessionLifecycleDiagnostic diagnostic)
+    {
+        if (Dispatcher.HasShutdownStarted) return;
+        Dispatcher.Invoke(UpdateState);
     }
 
     /// <summary>
@@ -122,7 +189,7 @@ public partial class CallsPage : UserControl, IModuleAware
         // 通话中按键走 DTMF；否则追加到号码框
         if (_modem?.Calls?.State == CallState.Active)
         {
-            await _modem.Calls.SendDtmfAsync(digit[0]);
+            await _modem.SendDtmfAsync(digit[0]);
         }
         else
         {
@@ -133,12 +200,16 @@ public partial class CallsPage : UserControl, IModuleAware
     private async void Dial_Click(object sender, RoutedEventArgs e)
     {
         var number = DialNumberBox.Text.Trim();
+        if (AppSettings.Current.PrivacyMode && number == HiddenValue && _incomingNumber is not null)
+        {
+            number = _incomingNumber;
+        }
         if (string.IsNullOrEmpty(number) || _modem?.Calls is null)
         {
             return;
         }
 
-        var ok = await _modem.Calls.DialAsync(number);
+        var ok = await _modem.DialAsync(number);
         if (!ok)
         {
             MessageBox.Show("拨号失败。模块可能不支持语音通话，或未注册到网络。",
@@ -153,7 +224,7 @@ public partial class CallsPage : UserControl, IModuleAware
         {
             return;
         }
-        await _modem.Calls.HangUpAsync();
+        await _modem.HangUpAsync();
         UpdateState();
         ReloadHistory();
     }
@@ -164,7 +235,7 @@ public partial class CallsPage : UserControl, IModuleAware
         {
             return;
         }
-        await _modem.Calls.AnswerAsync();
+        await _modem.AnswerAsync();
         UpdateState();
     }
 
@@ -175,7 +246,7 @@ public partial class CallsPage : UserControl, IModuleAware
             return;
         }
         _muted = !_muted;
-        await _modem.Calls.SetMuteAsync(_muted);
+        await _modem.SetCallMuteAsync(_muted);
         MuteButton.Content = _muted ? "取消静音" : "静音";
     }
 
@@ -190,7 +261,7 @@ public partial class CallsPage : UserControl, IModuleAware
         HistoryList.ItemsSource = _modem.Calls.History
             .Select(c => new CallRow
             {
-                Number = c.Number,
+                Number = DisplayNumber(c.Number),
                 DirIcon = c.Direction == CallDirection.Outgoing ? "↗" : (c.Missed ? "✕" : "↙"),
                 TimeText = c.Timestamp.ToString("MM-dd HH:mm"),
                 DurationText = c.Duration.HasValue && c.Duration.Value.TotalSeconds > 0
@@ -199,6 +270,9 @@ public partial class CallsPage : UserControl, IModuleAware
             })
             .ToList();
     }
+
+    private static string DisplayNumber(string? number) =>
+        AppSettings.Current.PrivacyMode && !string.IsNullOrEmpty(number) ? HiddenValue : number ?? string.Empty;
 
     private static string FormatDuration(TimeSpan d) =>
         d.TotalHours >= 1

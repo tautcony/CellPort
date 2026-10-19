@@ -44,20 +44,66 @@ public enum CallState
     Active,
     /// <summary>已挂断。</summary>
     Ended,
+    /// <summary>呼叫保持。</summary>
+    Held,
+    /// <summary>有数据占用，但没有确认的普通语音呼叫。</summary>
+    DataOccupied,
+    /// <summary>挂断命令已接受，仍等待网络状态确认。</summary>
+    HangupPending,
+    /// <summary>挂断结果未确认。</summary>
+    HangupUnconfirmed,
+    /// <summary>网络呼叫状态未知。</summary>
+    Unknown,
+}
+
+public enum CallCommandKind
+{
+    Dial,
+    Answer,
+    HangUp,
+}
+
+public enum CallCommandStatus
+{
+    Accepted,
+    Failed,
+    InvalidInput,
+}
+
+/// <summary>AT command outcome only; it does not confirm network call state.</summary>
+public sealed record CallCommandOutcome(
+    CallCommandKind Command,
+    CallCommandStatus Status,
+    AtCompletionStatus? AtCompletion = null)
+{
+    public bool Accepted => Status == CallCommandStatus.Accepted;
 }
 
 /// <summary>
 /// 语音通话服务。通过 AT 指令控制拨号、接听、挂断，并解析 URC 通话状态。
 /// </summary>
-public sealed class CallService(AtEngine engine)
+public sealed class CallService
 {
-    private readonly AtEngine _engine = engine;
+    private readonly AtEngine _engine;
+    private readonly CallTracker _tracker;
     private readonly List<CallRecord> _history = [];
     private readonly object _lock = new();
 
     private CallState _state = CallState.Idle;
     private string? _peerNumber;
-    private DateTime? _callStartedAt;
+    private CallKey? _currentCallKey;
+    private CallDirection? _currentDirection;
+    private DateTime _callCreatedAt;
+    private long? _activeStartedAt;
+    private CallState? _hangupStatus;
+    private int _refreshRequested;
+    private int _refreshWorkerStarted;
+
+    public CallService(AtEngine engine, CallTracker? tracker = null)
+    {
+        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _tracker = tracker ?? new CallTracker();
+    }
 
     /// <summary>通话状态变化。</summary>
     public event EventHandler<CallState>? StateChanged;
@@ -70,6 +116,9 @@ public sealed class CallService(AtEngine engine)
 
     /// <summary>当前对端号码。</summary>
     public string? PeerNumber => _peerNumber;
+
+    /// <summary>最近一次完整或未知的 CLCC 快照。</summary>
+    public CallSnapshot CurrentSnapshot => _tracker.Current;
 
     /// <summary>通话记录。</summary>
     public IReadOnlyList<CallRecord> History
@@ -91,69 +140,114 @@ public sealed class CallService(AtEngine engine)
         await SafeAsync("AT+CMOD=0", ct).ConfigureAwait(false);   // 单模
     }
 
+    /// <summary>Reads and applies one full CLCC snapshot at call-state priority.</summary>
+    public async Task<CallSnapshot> RefreshCallSnapshotAsync(CancellationToken ct = default)
+    {
+        if (!_tracker.IsModuleConnected)
+        {
+            return _tracker.Current;
+        }
+        var expectedModuleGeneration = _tracker.ModuleGeneration;
+        AtResult result;
+        try
+        {
+            result = await _engine.ExecuteAsync("AT+CLCC", AtCommandPriority.CallState,
+                TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            result = new AtResult("AT+CLCC", false, [], string.Empty, TimeSpan.Zero,
+                AtCompletionStatus.TransportFailure);
+        }
+
+        if (!_tracker.TryApply(ClccCallListParser.Parse(result), expectedModuleGeneration, out var snapshot))
+        {
+            return snapshot;
+        }
+        ApplySnapshot(snapshot);
+        return snapshot;
+    }
+
     /// <summary>拨号。</summary>
-    public async Task<bool> DialAsync(string number, CancellationToken ct = default)
+    internal async Task<bool> DialAsync(string number, CancellationToken ct = default) =>
+        (await DialCommandAsync(number, ct).ConfigureAwait(false)).Accepted;
+
+    internal async Task<CallCommandOutcome> DialCommandAsync(string number, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(number))
         {
-            return false;
+            return new CallCommandOutcome(CallCommandKind.Dial, CallCommandStatus.InvalidInput);
         }
 
         var normalized = new string([.. number.Where(c => char.IsDigit(c) || c == '+' || c == '*'
             || c == '#')]);
         if (normalized.Length == 0)
         {
-            return false;
+            return new CallCommandOutcome(CallCommandKind.Dial, CallCommandStatus.InvalidInput);
         }
 
         SetState(CallState.Dialing);
         _peerNumber = normalized;
 
         // 语音呼叫需带 ";"
-        var r = await SafeAsync($"ATD{normalized};", ct, TimeSpan.FromSeconds(15)).ConfigureAwait(false);
-        if (r is null)
+        var r = await SafeResultAsync($"ATD{normalized};", ct, TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+        if (r is not { Succeeded: true })
         {
-            SetState(CallState.Idle);
-            _peerNumber = null;
-            return false;
+            SetState(CallState.Unknown);
+            return new CallCommandOutcome(CallCommandKind.Dial, CallCommandStatus.Failed, r?.Completion);
         }
 
-        _callStartedAt = DateTime.Now;
-        return true;
+        return new CallCommandOutcome(CallCommandKind.Dial, CallCommandStatus.Accepted, r.Completion);
     }
 
     /// <summary>接听来电。</summary>
-    public async Task<bool> AnswerAsync(CancellationToken ct = default)
+    internal async Task<bool> AnswerAsync(CancellationToken ct = default) =>
+        (await AnswerCommandAsync(ct).ConfigureAwait(false)).Accepted;
+
+    internal async Task<CallCommandOutcome> AnswerCommandAsync(CancellationToken ct = default)
     {
-        var r = await SafeAsync("ATA", ct, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-        if (r is not null)
+        var r = await SafeResultAsync("ATA", ct, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        if (r is { Succeeded: true })
         {
-            _callStartedAt = DateTime.Now;
-            SetState(CallState.Active);
-            return true;
+            return new CallCommandOutcome(CallCommandKind.Answer, CallCommandStatus.Accepted, r.Completion);
         }
-        return false;
+        return new CallCommandOutcome(CallCommandKind.Answer, CallCommandStatus.Failed, r?.Completion);
     }
 
     /// <summary>挂断。</summary>
-    public async Task<bool> HangUpAsync(CancellationToken ct = default)
+    internal async Task<bool> HangUpAsync(CancellationToken ct = default) =>
+        (await HangUpCommandAsync(ct).ConfigureAwait(false)).Accepted;
+
+    internal async Task<CallCommandOutcome> HangUpCommandAsync(CancellationToken ct = default)
     {
-        var r = await SafeAsync("AT+CHUP", ct, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-        RecordCurrentCall();
-        SetState(CallState.Idle);
-        _peerNumber = null;
-        return r is not null;
+        var r = await SafeResultAsync("AT+CHUP", ct, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        if (r is not { Succeeded: true })
+        {
+            _hangupStatus = CallState.HangupUnconfirmed;
+            SetState(CallState.HangupUnconfirmed);
+            RequestSnapshotRefresh();
+            return new CallCommandOutcome(CallCommandKind.HangUp, CallCommandStatus.Failed, r?.Completion);
+        }
+
+        _hangupStatus = CallState.HangupPending;
+        SetState(CallState.HangupPending);
+        RequestSnapshotRefresh();
+        return new CallCommandOutcome(CallCommandKind.HangUp, CallCommandStatus.Accepted, r.Completion);
     }
 
     /// <summary>发送 DTMF（通话中按键）。</summary>
-    public async Task<bool> SendDtmfAsync(char digit, CancellationToken ct = default)
+    internal async Task<bool> SendDtmfAsync(char digit, CancellationToken ct = default)
     {
         var r = await SafeAsync($"AT+VTS={digit}", ct).ConfigureAwait(false);
         return r is not null;
     }
 
     /// <summary>静音控制（部分固件支持）。</summary>
-    public async Task<bool> SetMuteAsync(bool mute, CancellationToken ct = default)
+    internal async Task<bool> SetMuteAsync(bool mute, CancellationToken ct = default)
     {
         var r = await SafeAsync($"AT+CMUT={(mute ? 1 : 0)}", ct).ConfigureAwait(false);
         return r is not null;
@@ -168,6 +262,7 @@ public sealed class CallService(AtEngine engine)
         if (line.Equals("RING", StringComparison.OrdinalIgnoreCase))
         {
             SetState(CallState.Ringing);
+            RequestSnapshotRefresh();
             return true;
         }
 
@@ -181,6 +276,7 @@ public sealed class CallService(AtEngine engine)
                 SetState(CallState.Ringing);
                 IncomingCall?.Invoke(this, _peerNumber);
             }
+            RequestSnapshotRefresh();
             return true;
         }
 
@@ -188,35 +284,22 @@ public sealed class CallService(AtEngine engine)
         if (line.StartsWith("+CRC:", StringComparison.OrdinalIgnoreCase))
         {
             SetState(CallState.Ringing);
+            RequestSnapshotRefresh();
             return true;
         }
 
         if (line.StartsWith("+CIEV:", StringComparison.OrdinalIgnoreCase))
         {
-            var m = Regex.Match(line, @",\s*(\d+)\s*$");
-            if (m.Success && int.TryParse(m.Groups[1].Value, out var callState))
-            {
-                SetState(callState switch
-                {
-                    0 => CallState.Idle,
-                    1 => CallState.Active,
-                    _ => _state,
-                });
-                if (callState == 0)
-                {
-                    RecordCurrentCall();
-                    _peerNumber = null;
-                }
-            }
+            SetState(CallState.Unknown);
+            RequestSnapshotRefresh();
             return true;
         }
 
         // NO CARRIER —— 对方挂断
         if (line.StartsWith("NO CARRIER", StringComparison.OrdinalIgnoreCase))
         {
-            RecordCurrentCall();
-            SetState(CallState.Idle);
-            _peerNumber = null;
+            SetState(CallState.Unknown);
+            RequestSnapshotRefresh();
             return true;
         }
 
@@ -225,9 +308,8 @@ public sealed class CallService(AtEngine engine)
             line.StartsWith("NO ANSWER", StringComparison.OrdinalIgnoreCase) ||
             line.StartsWith("NO DIALTONE", StringComparison.OrdinalIgnoreCase))
         {
-            RecordCurrentCall();
-            SetState(CallState.Idle);
-            _peerNumber = null;
+            SetState(CallState.Unknown);
+            RequestSnapshotRefresh();
             return true;
         }
 
@@ -244,37 +326,155 @@ public sealed class CallService(AtEngine engine)
         StateChanged?.Invoke(this, state);
     }
 
-    private void RecordCurrentCall()
+    private void ApplySnapshot(CallSnapshot snapshot)
     {
-        if (string.IsNullOrEmpty(_peerNumber))
+        if (snapshot.IsUnknown)
+        {
+            SetState(_hangupStatus ?? CallState.Unknown);
+            return;
+        }
+
+        if (_currentCallKey is not null && !snapshot.Calls.Any(call => call.Key == _currentCallKey))
+        {
+            RecordCurrentCall(snapshot.SampledAtTimestamp);
+            _hangupStatus = null;
+        }
+
+        var voiceCalls = snapshot.Calls.Where(call => call.Entry.Mode == 0).ToArray();
+        if (_hangupStatus.HasValue)
+        {
+            var targetStillPresent = _currentCallKey is not null
+                ? snapshot.Calls.Any(call => call.Key == _currentCallKey)
+                : voiceCalls.Length > 0;
+            if (targetStillPresent)
+            {
+                SetState(_hangupStatus.Value);
+                return;
+            }
+            _hangupStatus = null;
+        }
+
+        if (voiceCalls.Length == 0)
+        {
+            SetState(snapshot.Calls.IsEmpty ? CallState.Idle : CallState.DataOccupied);
+            return;
+        }
+
+        if (voiceCalls.Length != 1)
+        {
+            SetState(CallState.Unknown);
+            return;
+        }
+
+        var call = voiceCalls[0];
+        if (_currentCallKey != call.Key)
+        {
+            _currentCallKey = call.Key;
+            _currentDirection = call.Key.Direction;
+            _callCreatedAt = DateTime.Now;
+            _activeStartedAt = null;
+            _peerNumber = call.Entry.Number ?? _peerNumber;
+        }
+        else if (!string.IsNullOrEmpty(call.Entry.Number))
+        {
+            _peerNumber = call.Entry.Number;
+        }
+
+        switch (call.State)
+        {
+            case TrackedCallState.Active:
+                _activeStartedAt ??= snapshot.SampledAtTimestamp;
+                SetState(CallState.Active);
+                break;
+            case TrackedCallState.Held:
+                SetState(CallState.Held);
+                break;
+            case TrackedCallState.Dialing:
+                SetState(CallState.Dialing);
+                break;
+            case TrackedCallState.Alerting:
+            case TrackedCallState.Incoming:
+            case TrackedCallState.Waiting:
+                SetState(CallState.Ringing);
+                break;
+            default:
+                SetState(CallState.Unknown);
+                break;
+        }
+    }
+
+    private void RecordCurrentCall(long endedAtTimestamp)
+    {
+        if (_currentCallKey is null)
         {
             return;
         }
 
-        var duration = _callStartedAt.HasValue
-            ? DateTime.Now - _callStartedAt.Value
+        var duration = _activeStartedAt is long activeStartedAt
+            ? _tracker.GetElapsedBetween(activeStartedAt, endedAtTimestamp)
             : (TimeSpan?)null;
 
         lock (_lock)
         {
             _history.Add(new CallRecord
             {
-                Number = _peerNumber,
-                Direction = _state == CallState.Dialing ? CallDirection.Outgoing : CallDirection.Incoming,
-                Timestamp = _callStartedAt ?? DateTime.Now,
+                Number = _peerNumber ?? string.Empty,
+                Direction = _currentDirection ?? _currentCallKey.Direction,
+                Timestamp = _callCreatedAt,
                 Duration = duration,
             });
         }
 
-        _callStartedAt = null;
+        _currentCallKey = null;
+        _currentDirection = null;
+        _peerNumber = null;
+        _activeStartedAt = null;
+    }
+
+    private void RequestSnapshotRefresh()
+    {
+        if (!_tracker.IsModuleConnected)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _refreshRequested, 1);
+        if (Interlocked.CompareExchange(ref _refreshWorkerStarted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (Interlocked.Exchange(ref _refreshRequested, 0) != 0)
+                {
+                    await RefreshCallSnapshotAsync().ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _refreshWorkerStarted, 0);
+                if (Volatile.Read(ref _refreshRequested) != 0)
+                {
+                    RequestSnapshotRefresh();
+                }
+            }
+        });
     }
 
     private async Task<AtResult?> SafeAsync(string cmd, CancellationToken ct, TimeSpan? timeout = null)
     {
+        var result = await SafeResultAsync(cmd, ct, timeout).ConfigureAwait(false);
+        return result is { Succeeded: true } ? result : null;
+    }
+
+    private async Task<AtResult?> SafeResultAsync(string cmd, CancellationToken ct, TimeSpan? timeout = null)
+    {
         try
         {
-            var r = await _engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
-            return r.Succeeded ? r : null;
+            return await _engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
         }
         catch
         {

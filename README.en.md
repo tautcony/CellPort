@@ -5,7 +5,7 @@
 **A Windows-native manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile switching · AT console.**
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-blue)
-![.NET](https://img.shields.io/badge/.NET-9.0%20WPF-512BD4)
+![.NET](https://img.shields.io/badge/.NET-10.0%20WPF-512BD4)
 ![Release](https://img.shields.io/github/v/release/xmgzxmgz/CellPort)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -20,7 +20,7 @@ feature-matched to CellDock on macOS: SMS, voice calls, device status,
 
 | Package | When to use |
 |---|---|
-| `CellPort-v*-win-x64.zip` (~0.4 MB) | You already have [.NET 9 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/9.0) |
+| `CellPort-v*-win-x64.zip` (~0.4 MB) | You already have [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
 | `CellPort-v*-win-x64-selfcontained.zip` (~60 MB) | No runtime needed — unzip and run |
 
 Unzip and run `CellPort.exe`.
@@ -124,7 +124,7 @@ Failure logs: `%APPDATA%\CellPort\last-connect.log` (full `[1/5]`~`[5/5]` trace)
 
 ## Build & run
 
-Requirements: Windows 10+, [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0),
+Requirements: Windows 10+, [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
 Quectel USB driver (usually bundled with Windows).
 
 ```bash
@@ -179,3 +179,5 @@ verify with `AT+CCHO=?` in the AT console.
 ## License
 
 [MIT](LICENSE)
+
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for bundled dependency licenses.

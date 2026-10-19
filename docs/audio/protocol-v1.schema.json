@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cellport.invalid/audio/protocol-v1.schema.json",
+  "title": "CellPort module audio protocol v1",
+  "description": "One framed request or response. The UTF-8 JSON body is limited to 65536 bytes before parsing.",
+  "x-maxMessageBytes": 65536,
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "errorCode": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "MALFORMED_MESSAGE",
+        "MESSAGE_TOO_LARGE",
+        "PROTOCOL_VERSION_UNSUPPORTED",
+        "REQUEST_ID_CONFLICT",
+        "REQUEST_SEQUENCE_STALE",
+        "OWNER_MISMATCH",
+        "BOOT_MISMATCH",
+        "GENERATION_MISMATCH",
+        "OPERATION_NOT_ALLOWED",
+        "OPERATION_CONFLICT",
+        "TRANSPORT_UNAVAILABLE",
+        "DEVICE_NOT_FOUND",
+        "ROOT_UNAVAILABLE",
+        "UNSUPPORTED_PROFILE",
+        "PAYLOAD_INVALID",
+        "DEVICE_IDENTITY_AMBIGUOUS",
+        "DEVICE_BUSY_DATA",
+        "CALL_STATE_UNKNOWN",
+        "CALIBRATION_FAILED",
+        "ROUTE_NOT_READY",
+        "USB_REENUM_TIMEOUT",
+        "ENDPOINT_MISSING",
+        "FORMAT_UNSUPPORTED",
+        "MIC_PERMISSION_DENIED",
+        "MEDIA_STALLED",
+        "RESTORE_CONFLICT",
+        "RESTORE_PENDING_CALL",
+        "RECOVERY_REQUIRED"
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageType",
+        "protocolVersion",
+        "requestId",
+        "requestSequence",
+        "bootId",
+        "sessionId",
+        "ownerToken",
+        "expectedGeneration",
+        "operation",
+        "payload"
+      ],
+      "properties": {
+        "messageType": { "const": "request" },
+        "protocolVersion": { "const": "1.0" },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "requestSequence": { "type": "integer", "minimum": 1 },
+        "bootId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sessionId": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 128 },
+            { "type": "null" }
+          ]
+        },
+        "ownerToken": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 256 },
+            { "type": "null" }
+          ]
+        },
+        "expectedGeneration": { "type": "integer", "minimum": 0 },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "inspect",
+            "prepare",
+            "renew",
+            "startRoute",
+            "stopRoute",
+            "release",
+            "status"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "manifestDigest": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+            "callGeneration": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "prepare" } }, "required": ["operation"] },
+          "then": { "properties": { "payload": { "required": ["profileId", "manifestDigest"] } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": { "enum": ["startRoute", "stopRoute"] }
+            },
+            "required": ["operation"]
+          },
+          "then": { "properties": { "payload": { "required": ["callGeneration"] } } }
+        }
+      ]
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageType",
+        "protocolVersion",
+        "requestId",
+        "requestSequence",
+        "phase",
+        "generation",
+        "outcome",
+        "errorCode",
+        "retryable",
+        "recoveryStatus",
+        "deviceMonotonicMs"
+      ],
+      "properties": {
+        "messageType": { "const": "response" },
+        "protocolVersion": { "const": "1.0" },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "requestSequence": { "type": "integer", "minimum": 0 },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "disconnected",
+            "inspecting",
+            "staging",
+            "runtime_ready",
+            "usb_reenumerating",
+            "standby_ready",
+            "restoring",
+            "released",
+            "restore_pending_call",
+            "recovery_required"
+          ]
+        },
+        "generation": { "type": "integer", "minimum": 0 },
+        "outcome": {
+          "type": "string",
+          "enum": ["accepted", "completed", "rejected", "failed"]
+        },
+        "errorCode": { "$ref": "#/$defs/errorCode" },
+        "retryable": { "type": "boolean" },
+        "recoveryStatus": {
+          "type": "string",
+          "enum": [
+            "none",
+            "not_required",
+            "pending",
+            "restore_pending_call",
+            "restored",
+            "conflict",
+            "recovery_required",
+            "unknown"
+          ]
+        },
+        "deviceMonotonicMs": { "type": "integer", "minimum": 0 },
+        "errorMessage": { "type": "string", "maxLength": 512 }
+      }
+    }
+  }
+}

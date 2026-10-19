@@ -5,7 +5,7 @@
 **A Windows-native manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile switching · AT console.**
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-blue)
-![.NET](https://img.shields.io/badge/.NET-9.0%20WPF-512BD4)
+![.NET](https://img.shields.io/badge/.NET-10.0%20WPF-512BD4)
 ![Release](https://img.shields.io/github/v/release/xmgzxmgz/CellPort)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -19,7 +19,7 @@ CellPort 是一款 **Windows 原生**（不依赖 WSL）的大疆一代 4G 模�
 
 | 包 | 适用场景 |
 |---|---|
-| `CellPort-v*-win-x64.zip`（约 0.4 MB） | 已装 [.NET 9 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/9.0)，体积小 |
+| `CellPort-v*-win-x64.zip`（约 0.4 MB） | 已装 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)，体积小 |
 | `CellPort-v*-win-x64-selfcontained.zip`（约 60 MB） | 免装运行时，解压即用 |
 
 解压运行 `CellPort.exe` 即可。
@@ -121,7 +121,7 @@ COM8/COM9 是蓝牙虚拟口（`BTHENUM`，应剔除）。本项目的连接流�
 
 ## 构建与运行
 
-需求：Windows 10+、[.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)、
+需求：Windows 10+、[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)、
 Quectel USB 驱动（插上模块 Windows 一般自带）。
 
 ```bash
@@ -205,3 +205,5 @@ Profile 列表与切卡功能不受影响。
 ## License
 
 [MIT](LICENSE)
+
+第三方依赖许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

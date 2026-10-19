@@ -46,6 +46,26 @@
                          Background="Transparent" BorderThickness="0"
                          SelectionChanged="Thread_SelectionChanged"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="{Binding DisplayNumber}"
+                                               FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                    <TextBlock Text="{Binding Time, StringFormat={}{0:MM-dd HH:mm}}"
+                                               HorizontalAlignment="Right"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextDimBrush}" />
+                                </Grid>
+                                <TextBlock Text="{Binding Preview}"
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextDimBrush}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="0" />

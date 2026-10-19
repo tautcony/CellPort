@@ -388,7 +388,7 @@ public sealed class LogicalChannelEs10
     /// 响应：BF31 &lt;len&gt; 80 01 &lt;code&gt;，code=0 成功；
     ///   1 = incorrectInputValues，2 = invalidProfile，3 = insufficientMemory。
     /// </summary>
-    public async Task<ProfileStateResult> SetProfileStateAsync(
+    internal async Task<ProfileStateResult> SetProfileStateAsync(
         string isdpAidHex, bool enable, CancellationToken ct = default)
     {
         if (_channel <= 0)

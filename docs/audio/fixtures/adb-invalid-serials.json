@@ -1,0 +1,16 @@
+{
+  "fixtureVersion": 1,
+  "fixtureName": "adb-invalid-serials",
+  "synthetic": true,
+  "devicesOutput": "List of devices attached\n?\tdevice usb:1-2 transport_id:41\n?\tdevice usb:1-5 transport_id:42\n",
+  "physicalAssociationByTransportId": {
+    "41": "container-a",
+    "42": "container-b"
+  },
+  "expected": {
+    "serialsReliable": false,
+    "transportIds": [41, 42],
+    "selectionWithoutPhysicalAssociation": "IdentityUnassociated",
+    "defaultFirstDeviceAllowed": false
+  }
+}

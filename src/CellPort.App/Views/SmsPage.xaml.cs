@@ -13,23 +13,26 @@ namespace CellPort.App.Views;
 public partial class SmsPage : UserControl, IModuleAware
 {
     private ModemManager? _modem;
+    private SmsService? _attachedSmsService;
     private readonly Dictionary<string, List<SmsMessage>> _threads = [];
     private string? _activeNumber;
+    private string? _activeRecipient;
+    private const string HiddenValue = "••••••";
 
     public SmsPage()
     {
         InitializeComponent();
+        AppSettings.SettingsChanged += OnSettingsChanged;
     }
 
     public void OnActivated(ModemManager modem)
     {
-        if (ReferenceEquals(_modem, modem))
+        if (!ReferenceEquals(_modem, modem))
         {
-            return;
+            Detach();
+            _modem = modem;
         }
 
-        Detach();
-        _modem = modem;
         Attach();
         Reload();
     }
@@ -41,39 +44,59 @@ public partial class SmsPage : UserControl, IModuleAware
             SendButton.IsEnabled = connected;
             if (connected)
             {
-                Reload();
+                Attach();
             }
+            else
+            {
+                Detach();
+            }
+            Reload();
         });
     }
 
     private void Attach()
     {
-        if (_modem?.Sms is not null)
+        var service = _modem?.Sms;
+        if (ReferenceEquals(service, _attachedSmsService))
         {
-            _modem.Sms.MessageReceived += OnMessageReceived;
+            return;
+        }
+
+        Detach();
+        _attachedSmsService = service;
+        if (_attachedSmsService is not null)
+        {
+            _attachedSmsService.InboxChanged += OnInboxChanged;
         }
     }
 
     private void Detach()
     {
-        if (_modem?.Sms is not null)
+        if (_attachedSmsService is not null)
         {
-            _modem.Sms.MessageReceived -= OnMessageReceived;
+            _attachedSmsService.InboxChanged -= OnInboxChanged;
+            _attachedSmsService = null;
         }
     }
 
-    private void OnMessageReceived(object? sender, SmsMessage msg)
+    private void OnInboxChanged(object? sender, EventArgs e)
     {
-        Dispatcher.Invoke(() =>
+        if (Dispatcher.HasShutdownStarted)
         {
-            Reload();
-            // 若正在查看该会话，追加到对话流
-            if (_activeNumber is not null && SameNumber(_activeNumber, msg.Number))
-            {
-                AppendBubble(msg);
-                MessageScroller.ScrollToEnd();
-            }
-        });
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() => Reload());
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() => Reload());
     }
 
     private void Reload()
@@ -83,9 +106,11 @@ public partial class SmsPage : UserControl, IModuleAware
         if (_modem?.Sms is null)
         {
             ThreadList.ItemsSource = null;
+            ClearConversation("未连接模块", "");
             return;
         }
 
+        var selectedKey = _activeNumber;
         foreach (var msg in _modem.Sms.Inbox)
         {
             var key = NormalizeForThread(msg.Number);
@@ -104,8 +129,9 @@ public partial class SmsPage : UserControl, IModuleAware
                 return new ThreadItem
                 {
                     Number = last.Number,
+                    DisplayNumber = DisplayNumber(last.Number),
                     Key = kv.Key,
-                    Preview = last.Body,
+                    Preview = AppSettings.Current.PrivacyMode ? HiddenValue : last.Body,
                     Time = last.Timestamp,
                     Count = kv.Value.Count,
                     HasCode = kv.Value.Any(m => m.VerificationCode is not null),
@@ -116,10 +142,25 @@ public partial class SmsPage : UserControl, IModuleAware
 
         ThreadList.ItemsSource = items;
 
-        if (items.Count > 0 && _activeNumber is null)
+        var selected = items.FirstOrDefault(item => item.Key == selectedKey) ?? items.FirstOrDefault();
+        if (selected is not null)
         {
-            ThreadList.SelectedIndex = 0;
+            ThreadList.SelectedItem = selected;
         }
+        else
+        {
+            _activeNumber = null;
+            _activeRecipient = null;
+            ClearConversation("暂无短信", "");
+        }
+    }
+
+    private void ClearConversation(string title, string details)
+    {
+        DetailNumber.Text = title;
+        DetailMeta.Text = details;
+        NumberBox.Clear();
+        MessagePanel.Children.Clear();
     }
 
     private void Thread_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -130,9 +171,10 @@ public partial class SmsPage : UserControl, IModuleAware
         }
 
         _activeNumber = item.Key;
-        DetailNumber.Text = item.Number;
+        _activeRecipient = item.Number;
+        DetailNumber.Text = DisplayNumber(item.Number);
         DetailMeta.Text = $"{item.Count} 条消息";
-        NumberBox.Text = item.Number;
+        NumberBox.Text = AppSettings.Current.PrivacyMode ? HiddenValue : item.Number;
 
         MessagePanel.Children.Clear();
         if (_threads.TryGetValue(item.Key, out var list))
@@ -166,7 +208,8 @@ public partial class SmsPage : UserControl, IModuleAware
         var stack = new StackPanel();
 
         // 验证码高亮
-        if (!outgoing && msg.VerificationCode is not null)
+        var privacyMode = AppSettings.Current.PrivacyMode;
+        if (!privacyMode && !outgoing && msg.VerificationCode is not null)
         {
             var codeRow = new StackPanel
             {
@@ -208,7 +251,7 @@ public partial class SmsPage : UserControl, IModuleAware
 
         stack.Children.Add(new TextBlock
         {
-            Text = msg.Body,
+            Text = privacyMode ? HiddenValue : msg.Body,
             FontSize = 13,
             TextWrapping = TextWrapping.Wrap,
             Foreground = outgoing
@@ -250,7 +293,7 @@ public partial class SmsPage : UserControl, IModuleAware
 
     private async Task SendAsync()
     {
-        var number = NumberBox.Text.Trim();
+        var number = GetCurrentRecipient();
         var body = BodyBox.Text.Trim();
 
         if (string.IsNullOrEmpty(number))
@@ -277,7 +320,7 @@ public partial class SmsPage : UserControl, IModuleAware
 
         try
         {
-            var ok = await _modem.Sms.SendAsync(number, body);
+            var ok = await _modem.SendSmsAsync(number, body);
             if (ok)
             {
                 BodyBox.Clear();
@@ -372,34 +415,42 @@ public partial class SmsPage : UserControl, IModuleAware
     private void NewSms_Click(object sender, RoutedEventArgs e)
     {
         _activeNumber = null;
+        _activeRecipient = null;
         ThreadList.SelectedItem = null;
-        DetailNumber.Text = "新短信";
-        DetailMeta.Text = "填写号码后发送";
-        NumberBox.Clear();
+        ClearConversation("新短信", "填写号码后发送");
         BodyBox.Clear();
-        MessagePanel.Children.Clear();
         NumberBox.Focus();
     }
 
     private void Call_Click(object sender, RoutedEventArgs e)
     {
-        var number = NumberBox.Text.Trim();
+        var number = GetCurrentRecipient();
         if (string.IsNullOrEmpty(number) || _modem?.Calls is null)
         {
             return;
         }
 
-        _ = _modem.Calls.DialAsync(number);
-        MessageBox.Show($"正在拨打 {number}…\n\n提示：语音通话需模块固件与运营商支持 VoLTE，" +
+        _ = _modem.DialAsync(number);
+        var displayNumber = AppSettings.Current.PrivacyMode ? HiddenValue : number;
+        MessageBox.Show($"正在拨打 {displayNumber}…\n\n提示：语音通话需模块固件与运营商支持 VoLTE，" +
                         "部分环境下可能无法建立音频通路。",
             "拨号", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
+    private string GetCurrentRecipient()
+    {
+        var text = NumberBox.Text.Trim();
+        return AppSettings.Current.PrivacyMode && text == HiddenValue && _activeRecipient is not null
+            ? _activeRecipient
+            : text;
+    }
+
+    private static string DisplayNumber(string number) =>
+        AppSettings.Current.PrivacyMode ? HiddenValue : number;
+
     private static string NormalizeForThread(string number) =>
         new([.. number.Where(char.IsDigit)]);
 
-    private static bool SameNumber(string a, string b) =>
-        NormalizeForThread(a) == NormalizeForThread(b);
 }
 
 /// <summary>会话列表项。</summary>
@@ -410,6 +461,9 @@ public sealed class ThreadItem
 
     /// <summary>展示用号码。</summary>
     public required string Number { get; init; }
+
+    /// <summary>遵循隐私模式的号码文本。</summary>
+    public required string DisplayNumber { get; init; }
 
     /// <summary>最后一条消息预览。</summary>
     public required string Preview { get; init; }

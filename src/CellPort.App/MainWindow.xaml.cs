@@ -4,8 +4,11 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using CellPort.App.Services;
 using CellPort.App.Views;
+using CellPort.Core.At;
 using CellPort.Core.Services;
+using CellPort.Audio.Core.Services;
 
 namespace CellPort.App;
 
@@ -14,9 +17,14 @@ namespace CellPort.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    private readonly ModemManager _modem = new(new WindowsAtChannelProvider());
+    private readonly DeviceOperationCoordinator _deviceOperations = new();
+    private readonly AudioSessionLifecycle _audioSessionLifecycle = new();
+    private readonly ModemManager _modem;
     private readonly Dictionary<string, UserControl> _pages = [];
     private readonly DispatcherTimer _refreshTimer = new();
+    private readonly SmsForwarder _smsForwarder = new();
+    private readonly CancellationTokenSource _smsForwardingCts = new();
+    private SmsService? _forwardingSmsService;
     private string _currentPage = "Sms";
 
     /// <summary>
@@ -29,6 +37,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _modem = new ModemManager(new WindowsAtChannelProvider())
+        {
+            OperationAdmission = _deviceOperations,
+        };
 
         // 把上次成功的 AT 口喂给 Core，让启动时优先尝试该口（秒连），
         // 同时注册回写回调，把新的成功端口持久化。
@@ -45,9 +57,10 @@ public partial class MainWindow : Window
         _modem.ConnectionChanged += OnConnectionChanged;
         _modem.StatusUpdated += OnStatusUpdated;
         _modem.TraceMessage += OnTraceMessage;
+        AppSettings.SettingsChanged += OnAppSettingsChanged;
 
         // 周期性刷新模块状态
-        _refreshTimer.Interval = TimeSpan.FromSeconds(5);
+        ApplyRefreshInterval();
         _refreshTimer.Tick += async (_, _) =>
         {
             if (_modem.IsConnected)
@@ -127,7 +140,62 @@ public partial class MainWindow : Window
     private async void OnClosed(object? sender, EventArgs e)
     {
         _refreshTimer.Stop();
+        AppSettings.SettingsChanged -= OnAppSettingsChanged;
+        UpdateSmsForwardingSubscription(connected: false);
+        _smsForwardingCts.Cancel();
         await _modem.DisposeAsync();
+        await _deviceOperations.DisposeAsync();
+        _smsForwardingCts.Dispose();
+    }
+
+    private void OnAppSettingsChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() => ApplyRefreshInterval());
+    }
+
+    private void ApplyRefreshInterval() =>
+        _refreshTimer.Interval = TimeSpan.FromSeconds(
+            Math.Clamp(AppSettings.Current.RefreshIntervalSeconds, 1, 3600));
+
+    private void UpdateSmsForwardingSubscription(bool connected)
+    {
+        var service = connected ? _modem.Sms : null;
+        if (ReferenceEquals(service, _forwardingSmsService))
+        {
+            return;
+        }
+
+        if (_forwardingSmsService is not null)
+        {
+            _forwardingSmsService.MessageReceived -= OnSmsReceived;
+        }
+
+        _forwardingSmsService = service;
+        if (_forwardingSmsService is not null)
+        {
+            _forwardingSmsService.MessageReceived += OnSmsReceived;
+        }
+    }
+
+    private async void OnSmsReceived(object? sender, SmsMessage message)
+    {
+        try
+        {
+            await _smsForwarder.ForwardAsync(message, _smsForwardingCts.Token);
+        }
+        catch (OperationCanceledException) when (_smsForwardingCts.IsCancellationRequested)
+        {
+            // Window is closing.
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"短信转发处理失败：{ex.GetType().Name}。");
+        }
     }
 
     /// <summary>
@@ -269,6 +337,8 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
+            UpdateSmsForwardingSubscription(connected);
+
             if (connected)
             {
                 _everConnected = true;
@@ -364,7 +434,7 @@ public partial class MainWindow : Window
     private UserControl CreatePage(string tag) => tag switch
     {
         "Sms" => new SmsPage(),
-        "Calls" => new CallsPage(),
+        "Calls" => new CallsPage(_audioSessionLifecycle),
         "Device" => new DevicePage(),
         "Esim" => new EsimPage(),
         "Console" => new ConsolePage(),

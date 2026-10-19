@@ -1,0 +1,92 @@
+{
+  "vectorSet": "cellport-module-audio-v1",
+  "protocolVersion": "1.0",
+  "synthetic": true,
+  "vectors": [
+    {
+      "id": "inspect-v1",
+      "request": {
+        "messageType": "request",
+        "protocolVersion": "1.0",
+        "requestId": "vector-inspect-1",
+        "requestSequence": 1,
+        "bootId": "synthetic-boot",
+        "sessionId": null,
+        "ownerToken": null,
+        "expectedGeneration": 0,
+        "operation": "inspect",
+        "payload": {}
+      },
+      "expected": "read-only inspection; no journal or USB mutation"
+    },
+    {
+      "id": "prepare-candidate-rejected",
+      "request": {
+        "messageType": "request",
+        "protocolVersion": "1.0",
+        "requestId": "vector-prepare-1",
+        "requestSequence": 1,
+        "bootId": "synthetic-boot",
+        "sessionId": "synthetic-session",
+        "ownerToken": "synthetic-owner",
+        "expectedGeneration": 0,
+        "operation": "prepare",
+        "payload": {
+          "profileId": "candidate-only",
+          "manifestDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      "expected": "UNSUPPORTED_PROFILE until the exact profile is approved"
+    },
+    {
+      "id": "unknown-major-rejected",
+      "request": {
+        "messageType": "request",
+        "protocolVersion": "2.0",
+        "requestId": "vector-v2-1",
+        "requestSequence": 1,
+        "bootId": "synthetic-boot",
+        "sessionId": null,
+        "ownerToken": null,
+        "expectedGeneration": 0,
+        "operation": "inspect",
+        "payload": {}
+      },
+      "expected": "PROTOCOL_VERSION_UNSUPPORTED; no attempt to parse as v1 and no side effect"
+    },
+    {
+      "id": "restore-deferred-on-unknown-occupancy",
+      "response": {
+        "messageType": "response",
+        "protocolVersion": "1.0",
+        "requestId": "vector-release-4",
+        "requestSequence": 4,
+        "phase": "restore_pending_call",
+        "generation": 8,
+        "outcome": "rejected",
+        "errorCode": "RESTORE_PENDING_CALL",
+        "retryable": true,
+        "recoveryStatus": "restore_pending_call",
+        "deviceMonotonicMs": 12345
+      },
+      "expected": "media stopped; exact USB snapshot retained; no hangup; no success receipt"
+    },
+    {
+      "id": "restore-verified",
+      "response": {
+        "messageType": "response",
+        "protocolVersion": "1.0",
+        "requestId": "vector-release-5",
+        "requestSequence": 5,
+        "phase": "released",
+        "generation": 9,
+        "outcome": "completed",
+        "errorCode": "NONE",
+        "retryable": false,
+        "recoveryStatus": "restored",
+        "deviceMonotonicMs": 12400
+      },
+      "expected": "original values read back; ownership released; receipt names verified fields"
+    }
+  ]
+}

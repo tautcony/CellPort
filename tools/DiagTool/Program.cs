@@ -13,6 +13,19 @@ using CellPort.Core.Transport;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+if (args.Length > 0 && args[0].Equals("audio-status", StringComparison.OrdinalIgnoreCase))
+{
+    Console.WriteLine("通话音频不可用：当前没有通过 G0-B 的设备运行时和已就绪的平台媒体后端。");
+    Console.WriteLine("status=UNSUPPORTED_PROFILE");
+    Console.WriteLine("audioAvailable=false");
+    return 7;
+}
+
+if (args.Length > 0 && args[0].Equals("inspect", StringComparison.OrdinalIgnoreCase))
+{
+    return await RunReadOnlyInspectAsync(args.Skip(1).ToArray());
+}
+
 Console.WriteLine("=== DJI 4G 模块诊断工具 ===\n");
 
 // ---- 1. 设备枚举 ----
@@ -162,3 +175,32 @@ if (atIndex >= 0 && atIndex + 1 < args.Length)
 
 Console.WriteLine("\n=== 诊断完成 ===");
 return 0;
+
+static async Task<int> RunReadOnlyInspectAsync(string[] inspectArgs)
+{
+    var portIndex = Array.IndexOf(inspectArgs, "--port");
+    if (portIndex < 0 || portIndex + 1 >= inspectArgs.Length ||
+        string.IsNullOrWhiteSpace(inspectArgs[portIndex + 1]))
+    {
+        Console.Error.WriteLine("用法：cellport-diag inspect --port <当前已确认的 AT 端口>");
+        return 2;
+    }
+
+    var port = inspectArgs[portIndex + 1];
+    Console.WriteLine("只读检查：仅发送 AT、AT+CGMM、AT+CGMR、AT+CLCC；不会执行通话或 USB 修改。");
+    var channel = new WindowsAtChannelProvider().CreateSerial(port);
+    var report = await ModuleInspector.InspectAsync(channel);
+    Console.WriteLine($"status={report.Code}");
+    Console.WriteLine($"model={report.Model ?? "--"}");
+    Console.WriteLine($"firmware={report.Firmware ?? "--"}");
+    Console.WriteLine($"clcc={report.ClccOutcome}");
+    Console.WriteLine($"voiceCalls={report.ActiveVoiceCallCount}; nonVoiceOccupancy={report.NonVoiceOccupancyCount}");
+    return report.Status switch
+    {
+        ModuleInspectStatus.Inspected => 0,
+        ModuleInspectStatus.ActiveVoiceCall => 3,
+        ModuleInspectStatus.DeviceBusyData => 4,
+        ModuleInspectStatus.CallStateUnknown => 5,
+        _ => 6,
+    };
+}

@@ -16,10 +16,11 @@ Write-Host "仓库: $RepoRoot"
 
 Push-Location $RepoRoot
 try {
-    # 1) framework-dependent（需要 .NET 9 Desktop Runtime，体积小）
+    # 1) framework-dependent（需要 .NET 10 Desktop Runtime，体积小）
     Write-Host "`n==> [1/2] framework-dependent" -ForegroundColor Yellow
     & $Dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained false -o dist/framework-dependent
     if ($LASTEXITCODE -ne 0) { throw "publish framework-dependent 失败" }
+    Copy-Item "THIRD-PARTY-NOTICES.md" -Destination "dist/framework-dependent/THIRD-PARTY-NOTICES.md" -Force
 
     $fdZip = Join-Path $OutDir "CellPort-v$Version-win-x64.zip"
     if (Test-Path $fdZip) { Remove-Item $fdZip -Force }
@@ -31,6 +32,7 @@ try {
         Write-Host "`n==> [2/2] self-contained" -ForegroundColor Yellow
         & $Dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained true -o dist/self-contained
         if ($LASTEXITCODE -ne 0) { throw "publish self-contained 失败" }
+        Copy-Item "THIRD-PARTY-NOTICES.md" -Destination "dist/self-contained/THIRD-PARTY-NOTICES.md" -Force
 
         $scZip = Join-Path $OutDir "CellPort-v$Version-win-x64-selfcontained.zip"
         if (Test-Path $scZip) { Remove-Item $scZip -Force }

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -18,6 +18,19 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CellPort.Core\CellPort.Core.csproj" />
+    <ProjectReference Include="..\..\src\CellPort.Audio.Core\CellPort.Audio.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\docs\audio\fixtures\redacted-readonly-baseline.json"
+          Link="Fixtures\redacted-readonly-baseline.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\docs\audio\fixtures\windows-dual-module-same-name.json"
+          Link="Fixtures\windows-dual-module-same-name.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\docs\audio\fixtures\adb-invalid-serials.json"
+          Link="Fixtures\adb-invalid-serials.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,41 @@
+{
+  "vectorSet": "cellport-clcc-v1",
+  "synthetic": true,
+  "vectors": [
+    {
+      "id": "complete-empty",
+      "queryOutcome": "success",
+      "lines": ["AT+CLCC", "OK"],
+      "expected": { "state": "confirmed-empty", "voiceCalls": 0, "nonVoiceOccupancy": 0 }
+    },
+    {
+      "id": "two-active-data-entries",
+      "queryOutcome": "success",
+      "lines": [
+        "AT+CLCC",
+        "+CLCC: 1,1,0,1,0,\"<redacted>\",128",
+        "+CLCC: 2,1,0,1,0,\"<redacted>\",128",
+        "OK"
+      ],
+      "expected": { "state": "occupied-data", "voiceCalls": 0, "nonVoiceOccupancy": 2, "prepareAllowed": false }
+    },
+    {
+      "id": "active-ordinary-voice",
+      "queryOutcome": "success",
+      "lines": ["AT+CLCC", "+CLCC: 3,1,0,0,0,\"<redacted>\",129", "OK"],
+      "expected": { "state": "active-voice", "voiceCalls": 1, "nonVoiceOccupancy": 0 }
+    },
+    {
+      "id": "query-error-is-unknown",
+      "queryOutcome": "error",
+      "lines": ["AT+CLCC", "ERROR"],
+      "expected": { "state": "unknown", "prepareAllowed": false, "uplinkAllowed": false }
+    },
+    {
+      "id": "truncated-is-unknown",
+      "queryOutcome": "partial",
+      "lines": ["AT+CLCC", "+CLCC: 4,1,0"],
+      "expected": { "state": "unknown", "prepareAllowed": false, "uplinkAllowed": false }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "fixtureVersion": 1,
+  "fixtureName": "windows-dual-module-same-name",
+  "synthetic": true,
+  "deviceNodes": [
+    {
+      "instanceId": "USB\\VID_2CA3&PID_4006&MI_07\\PORT_A_IF7",
+      "parentInstanceId": "USB\\VID_2CA3&PID_4006\\PORT_A",
+      "containerId": "2f123456-1111-2222-3333-000000000001",
+      "locationPaths": ["PCIROOT(0)#USBROOT(0)#USB(2)#USBMI(07)"],
+      "hardwareIds": ["USB\\VID_2CA3&PID_4006&MI_07"],
+      "friendlyName": "AC Interface"
+    },
+    {
+      "instanceId": "USB\\VID_2CA3&PID_4006&MI_03\\PORT_A_IF3",
+      "parentInstanceId": "USB\\VID_2CA3&PID_4006\\PORT_A",
+      "containerId": "2f123456-1111-2222-3333-000000000001",
+      "locationPaths": ["PCIROOT(0)#USBROOT(0)#USB(2)#USBMI(03)"],
+      "hardwareIds": ["USB\\VID_2CA3&PID_4006&MI_03"],
+      "friendlyName": "AT Control Port (COM12)"
+    },
+    {
+      "instanceId": "USB\\VID_2CA3&PID_4006&MI_05\\PORT_B_IF5",
+      "parentInstanceId": "USB\\VID_2CA3&PID_4006\\PORT_B",
+      "containerId": "2f123456-1111-2222-3333-000000000002",
+      "locationPaths": ["PCIROOT(0)#USBROOT(0)#USB(5)#USBMI(05)"],
+      "hardwareIds": ["USB\\VID_2CA3&PID_4006&MI_05"],
+      "friendlyName": "AC Interface"
+    }
+  ]
+}

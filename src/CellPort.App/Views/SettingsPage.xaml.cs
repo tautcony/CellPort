@@ -160,6 +160,8 @@ public sealed class AppSettings
 {
     private static AppSettings? _current;
 
+    public static event EventHandler? SettingsChanged;
+
     /// <summary>当前设置实例。</summary>
     public static AppSettings Current => _current ??= Load();
 
@@ -239,6 +241,15 @@ public sealed class AppSettings
         catch
         {
             // 写入失败不阻断界面
+        }
+
+        try
+        {
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch
+        {
+            // 设置变更通知失败不影响保存与主流程
         }
     }
 }

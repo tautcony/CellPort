@@ -44,6 +44,7 @@ Name: "autostart"; Description: "开机自动启动 {#MyAppName}"; \
 [Files]
 Source: "..\dist\framework-dependent\*"; DestDir: "{app}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
@@ -62,7 +63,7 @@ Filename: "{app}\{#MyAppExeName}"; \
 ; 卸载时保留用户数据（%APPDATA%\CellPort 设置与 %LOCALAPPDATA%\CellPort 日志），仅清理安装目录
 
 [Code]
-function HasDesktopRuntime9(): Boolean;
+function HasDesktopRuntime10(): Boolean;
 var
   FindRec: TFindRec;
   runtimeDir: String;
@@ -70,7 +71,7 @@ begin
   Result := False;
   runtimeDir := ExpandConstant('{pf}\dotnet\shared\Microsoft.WindowsDesktop.App');
   if DirExists(runtimeDir) then begin
-    if FindFirst(runtimeDir + '\9.*', FindRec) then begin
+    if FindFirst(runtimeDir + '\10.*', FindRec) then begin
       Result := True;
       FindClose(FindRec);
     end;
@@ -80,11 +81,11 @@ end;
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  if not HasDesktopRuntime9() then begin
+  if not HasDesktopRuntime10() then begin
     Result := MsgBox(
-      '未检测到 .NET 9 Desktop Runtime (x64)。' + #13#10 +
+      '未检测到 .NET 10 Desktop Runtime (x64)。' + #13#10 +
       '没有它 CellPort 可能无法启动。' + #13#10 + #13#10 +
-      '可从 https://dotnet.microsoft.com/download/dotnet/9.0 免费下载。' + #13#10 + #13#10 +
+      '可从 https://dotnet.microsoft.com/download/dotnet/10.0 免费下载。' + #13#10 + #13#10 +
       '是否仍要继续安装？',
       mbConfirmation, MB_YESNO) = IDYES;
   end;

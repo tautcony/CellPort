@@ -16,6 +16,9 @@ public sealed class SmsService(AtEngine engine)
     /// <summary>收到一条新短信（含拼接完成的长短信）时触发。</summary>
     public event EventHandler<SmsMessage>? MessageReceived;
 
+    /// <summary>收件箱内容变化时触发，包括批量同步和发送成功。</summary>
+    public event EventHandler? InboxChanged;
+
     /// <summary>当前收件箱快照。</summary>
     public IReadOnlyList<SmsMessage> Inbox
     {
@@ -89,6 +92,11 @@ public sealed class SmsService(AtEngine engine)
             }
         }
 
+        if (added > 0)
+        {
+            InboxChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         return added;
     }
 
@@ -143,6 +151,7 @@ public sealed class SmsService(AtEngine engine)
             if (msg is not null && Accept(msg))
             {
                 MessageReceived?.Invoke(this, msg);
+                InboxChanged?.Invoke(this, EventArgs.Empty);
                 return msg;
             }
         }
@@ -174,6 +183,7 @@ public sealed class SmsService(AtEngine engine)
         if (Accept(msg))
         {
             MessageReceived?.Invoke(this, msg);
+            InboxChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -183,7 +193,7 @@ public sealed class SmsService(AtEngine engine)
     /// <param name="number">目标号码，可带 + 前缀。</param>
     /// <param name="body">正文。</param>
     /// <param name="ct">取消令牌。</param>
-    public async Task<bool> SendAsync(string number, string body, CancellationToken ct = default)
+    internal async Task<bool> SendAsync(string number, string body, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(number) || string.IsNullOrWhiteSpace(body))
         {
@@ -223,6 +233,7 @@ public sealed class SmsService(AtEngine engine)
             {
                 _inbox.Add(msg);
             }
+            InboxChanged?.Invoke(this, EventArgs.Empty);
         }
 
         return ok;

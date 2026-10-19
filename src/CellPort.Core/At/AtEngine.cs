@@ -16,7 +16,8 @@ public sealed record AtResult(
     bool Succeeded,
     IReadOnlyList<string> Lines,
     string RawText,
-    TimeSpan Duration)
+    TimeSpan Duration,
+    AtCompletionStatus Completion = AtCompletionStatus.Unknown)
 {
     /// <summary>取第一行，没有则返回 null。</summary>
     public string? FirstLine => Lines.Count > 0 ? Lines[0] : null;
@@ -27,6 +28,17 @@ public sealed record AtResult(
 
     public override string ToString() =>
         $"{Command} => {(Succeeded ? "OK" : "FAIL")} ({Lines.Count} lines, {Duration.TotalMilliseconds:F0}ms)";
+}
+
+/// <summary>How an AT command ended, so callers can distinguish ERROR from no response.</summary>
+public enum AtCompletionStatus
+{
+    Unknown,
+    Ok,
+    Error,
+    Timeout,
+    TransportFailure,
+    OperationRejected,
 }
 
 /// <summary>
@@ -41,7 +53,7 @@ public sealed class AtEngine : IAsyncDisposable
     public static readonly TimeSpan LongTimeout = TimeSpan.FromSeconds(60);
 
     private readonly IAtChannel _channel;
-    private readonly SemaphoreSlim _commandLock = new(1, 1);
+    private readonly PrioritizedCommandLock _commandLock = new();
     private readonly StringBuilder _pending = new();
     private readonly List<string> _unsolicitedQueue = [];
     private readonly object _unsolicitedLock = new();
@@ -69,15 +81,36 @@ public sealed class AtEngine : IAsyncDisposable
     public async Task<AtResult> ExecuteAsync(
         string command,
         TimeSpan? timeout = null,
+        CancellationToken ct = default) =>
+        await ExecuteAsync(command, AtCommandPriority.Interactive, timeout, ct).ConfigureAwait(false);
+
+    /// <summary>Executes a command at the requested priority without interrupting an active exchange.</summary>
+    public async Task<AtResult> ExecuteAsync(
+        string command,
+        AtCommandPriority priority,
+        TimeSpan? timeout = null,
         CancellationToken ct = default)
     {
         var effectiveTimeout = timeout ?? DefaultTimeout;
         var full = string.IsNullOrWhiteSpace(command) ? "AT" : command.Trim();
-
-        await _commandLock.WaitAsync(ct).ConfigureAwait(false);
         var started = DateTime.UtcNow;
-        try
+
+        var lease = await _commandLock.AcquireAsync(priority, effectiveTimeout, ct).ConfigureAwait(false);
+        if (lease is null)
         {
+            return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
+                AtCompletionStatus.Timeout);
+        }
+
+        using var commandLease = lease;
+        {
+            var remaining = effectiveTimeout - (DateTime.UtcNow - started);
+            if (remaining <= TimeSpan.Zero)
+            {
+                return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
+                    AtCompletionStatus.Timeout);
+            }
+
             try
             {
                 await _channel.WriteAsync(Encoding.ASCII.GetBytes(full + "\r"), ct).ConfigureAwait(false);
@@ -90,10 +123,6 @@ public sealed class AtEngine : IAsyncDisposable
             }
 
             return await ReadUntilFinalAsync(full, effectiveTimeout, started, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _commandLock.Release();
         }
     }
 
@@ -108,6 +137,7 @@ public sealed class AtEngine : IAsyncDisposable
         var lines = new List<string>();
         var lastText = string.Empty;
         var echoConsumed = false;
+        var transportFailed = false;
 
         while (DateTime.UtcNow < deadline)
         {
@@ -126,6 +156,7 @@ public sealed class AtEngine : IAsyncDisposable
             catch (Exception ex)
             {
                 IoTrace?.Invoke(this, $"!!! read failed: {ex.GetType().Name} {ex.Message}");
+                transportFailed = true;
                 break;
             }
 
@@ -156,7 +187,8 @@ public sealed class AtEngine : IAsyncDisposable
                     if (isFinal)
                     {
                         return new AtResult(command, isOk, lines,
-                            string.Join("\n", lines), DateTime.UtcNow - started);
+                            string.Join("\n", lines), DateTime.UtcNow - started,
+                            isOk ? AtCompletionStatus.Ok : AtCompletionStatus.Error);
                     }
 
                     if (!handled)
@@ -178,7 +210,8 @@ public sealed class AtEngine : IAsyncDisposable
             _pending.Clear();
         }
 
-        return new AtResult(command, false, lines, string.Join("\n", lines), DateTime.UtcNow - started);
+        return new AtResult(command, false, lines, string.Join("\n", lines), DateTime.UtcNow - started,
+            transportFailed ? AtCompletionStatus.TransportFailure : AtCompletionStatus.Timeout);
     }
 
     /// <summary>

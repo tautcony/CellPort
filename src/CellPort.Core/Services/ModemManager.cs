@@ -79,11 +79,17 @@ public sealed class ModemManager : IAsyncDisposable
     /// <summary>当前状态快照。</summary>
     public DeviceStatus Status { get; private set; } = new();
 
+    /// <summary>呼叫快照跟踪器；每次模块连接都会创建新的 module generation。</summary>
+    public CallTracker CallTracker { get; } = new();
+
     /// <summary>短信服务。</summary>
     public SmsService? Sms { get; private set; }
 
     /// <summary>通话服务。</summary>
     public CallService? Calls { get; private set; }
+
+    /// <summary>Shared with the audio session service so legacy module writes cannot bypass an owned session.</summary>
+    public IModuleOperationAdmission? OperationAdmission { get; set; }
 
     /// <summary>设备信息服务。</summary>
     public DeviceInfoService? Info { get; private set; }
@@ -244,9 +250,10 @@ public sealed class ModemManager : IAsyncDisposable
         Trace("      AT 响应正常。");
 
         _engine = engine;
+        CallTracker.BeginModuleSession();
 
         Sms = new SmsService(engine);
-        Calls = new CallService(engine);
+        Calls = new CallService(engine, CallTracker);
         Info = new DeviceInfoService(engine);
         Cusd = new CusdService(engine);
         Phonebook = new PhonebookService(engine);
@@ -279,6 +286,8 @@ public sealed class ModemManager : IAsyncDisposable
     /// <summary>断开连接。</summary>
     public async Task DisconnectAsync()
     {
+        CallTracker.MarkModuleDisconnected();
+
         if (_pumpCts is not null)
         {
             await _pumpCts.CancelAsync().ConfigureAwait(false);
@@ -323,10 +332,125 @@ public sealed class ModemManager : IAsyncDisposable
     {
         if (_engine is null)
         {
-            return new AtResult(command, false, [], "未连接模块。", TimeSpan.Zero);
+            return new AtResult(command, false, [], "未连接模块。", TimeSpan.Zero,
+                AtCompletionStatus.TransportFailure);
         }
+        var operation = ClassifyAtCommand(command);
+        var admission = await TryAcquireOperationAsync(operation.Kind, operation.RawCommandIsReadOnly, ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+            return new AtResult(command, false, [], admission.ErrorCode ?? "OperationConflict", TimeSpan.Zero,
+                AtCompletionStatus.OperationRejected);
+        await using var lease = admission.Lease;
         return await _engine.ExecuteAsync(command, TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
     }
+
+    public async ValueTask<ModuleOperationAdmissionResult> TryAcquireOperationAsync(
+        ModuleOperationKind kind,
+        bool rawCommandIsReadOnly = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (OperationAdmission is null) return ModuleOperationAdmissionResult.Permit();
+        return await OperationAdmission.TryAcquireAsync(kind, rawCommandIsReadOnly, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<bool> SendSmsAsync(string number, string body, CancellationToken ct = default)
+    {
+        if (Sms is null) return false;
+        var admission = await TryAcquireOperationAsync(ModuleOperationKind.SmsWrite, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed) return false;
+        await using var lease = admission.Lease;
+        return await Sms.SendAsync(number, body, ct).ConfigureAwait(false);
+    }
+
+    public async Task<CusdService.CusdResult> SendUssdAsync(string code, CancellationToken ct = default)
+    {
+        if (Cusd is null) return new CusdService.CusdResult(false, null, "模块未连接");
+        var admission = await TryAcquireOperationAsync(ModuleOperationKind.RawConsoleCommand, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+            return new CusdService.CusdResult(false, null, $"操作被仲裁器拒绝：{admission.ErrorCode}");
+        await using var lease = admission.Lease;
+        return await Cusd.SendAsync(code, ct).ConfigureAwait(false);
+    }
+
+    public Task<bool> DialAsync(string number, CancellationToken ct = default) =>
+        RunCallControlAsync(calls => calls.DialAsync(number, ct), ct);
+
+    public Task<bool> AnswerAsync(CancellationToken ct = default) =>
+        RunCallControlAsync(calls => calls.AnswerAsync(ct), ct);
+
+    public Task<bool> HangUpAsync(CancellationToken ct = default) =>
+        RunCallControlAsync(calls => calls.HangUpAsync(ct), ct);
+
+    public Task<bool> SendDtmfAsync(char digit, CancellationToken ct = default) =>
+        RunCallControlAsync(calls => calls.SendDtmfAsync(digit, ct), ct);
+
+    public async Task<LogicalChannelEs10.ProfileStateResult> SetEsimProfileStateAsync(
+        string isdpAidHex, bool enable, CancellationToken ct = default)
+    {
+        var es10 = Info?.Es10;
+        if (es10 is null)
+            return new LogicalChannelEs10.ProfileStateResult(false, -1, "eUICC 通道未就绪");
+        var admission = await TryAcquireOperationAsync(ModuleOperationKind.EsimModification, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+            return new LogicalChannelEs10.ProfileStateResult(false, -2, $"操作被仲裁器拒绝：{admission.ErrorCode}");
+        await using var lease = admission.Lease;
+        if (es10.Channel <= 0)
+        {
+            var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
+            if (opened is null || opened <= 0)
+                return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
+        }
+        return await es10.SetProfileStateAsync(isdpAidHex, enable, ct).ConfigureAwait(false);
+    }
+
+    public Task<bool> SetCallMuteAsync(bool muted, CancellationToken ct = default) =>
+        RunCallControlAsync(calls => calls.SetMuteAsync(muted, ct), ct);
+
+    private async Task<bool> RunCallControlAsync(Func<CallService, Task<bool>> operation, CancellationToken ct)
+    {
+        if (Calls is null) return false;
+        var admission = await TryAcquireOperationAsync(ModuleOperationKind.CallControl, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed) return false;
+        await using var lease = admission.Lease;
+        return await operation(Calls).ConfigureAwait(false);
+    }
+
+    internal static (ModuleOperationKind Kind, bool RawCommandIsReadOnly) ClassifyAtCommand(string command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var normalized = command.Trim().ToUpperInvariant();
+        if (normalized.StartsWith("AT+CFUN=", StringComparison.Ordinal))
+            return (ModuleOperationKind.CfunChange, false);
+        if (normalized.StartsWith("AT+CGLA=", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+CSIM=", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+CCHO=", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+CCHC=", StringComparison.Ordinal))
+            return (ModuleOperationKind.EsimModification, false);
+        if (normalized == "ATA" || normalized == "ATH" || normalized.StartsWith("ATD", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+CHUP", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+VTS=", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+CMUT=", StringComparison.Ordinal))
+            return (ModuleOperationKind.CallControl, false);
+        if (normalized.StartsWith("AT+CMGS=", StringComparison.Ordinal) || normalized.EndsWith("\u001A", StringComparison.Ordinal))
+            return (ModuleOperationKind.SmsWrite, false);
+        if (normalized.StartsWith("AT+CGATT=", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+QNETDEVCTL=", StringComparison.Ordinal) ||
+            normalized.StartsWith("AT+QCFG=\"USBNET\"", StringComparison.Ordinal))
+            return (ModuleOperationKind.UsbNetworkChange, false);
+        if (IsReadOnlyConsoleCommand(normalized)) return (ModuleOperationKind.ReadOnlyQuery, true);
+        return (ModuleOperationKind.RawConsoleCommand, false);
+    }
+
+    private static bool IsReadOnlyConsoleCommand(string command) => command is
+        "AT" or "ATI" or "AT+CGMI" or "AT+CGMM" or "AT+CGMR" or "AT+CGSN" or
+        "AT+CLCC" or "AT+CPIN?" or "AT+CSQ" or "AT+CPMS?" or "AT+COPS?" or
+        "AT+CREG?" or "AT+CEREG?" or "AT+CGATT?" or "AT+CFUN?" or "AT+QENG=\"SERVINGCELL\"";
 
     /// <summary>
     /// 主动上报泵：周期性轮询 AtEngine 的上报队列并分发给各服务。

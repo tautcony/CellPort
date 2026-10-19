@@ -300,7 +300,7 @@ public partial class DevicePage : UserControl, IModuleAware
     /// <summary>发送 USSD 请求并展示网络响应。</summary>
     private async void UssdSend_Click(object sender, RoutedEventArgs e)
     {
-        if (_modem is null || !_modem.IsConnected || _modem.Cusd is null)
+        if (_modem is null || !_modem.IsConnected)
         {
             UssdResult.Text = "模块未连接。";
             return;
@@ -318,7 +318,7 @@ public partial class DevicePage : UserControl, IModuleAware
 
         try
         {
-            var r = await _modem.Cusd.SendAsync(code);
+            var r = await _modem.SendUssdAsync(code);
             UssdResult.Text = r.Ok
                 ? (r.Text is { Length: > 0 } ? r.Text : "（网络返回空内容）")
                 : $"失败：{r.Raw ?? "无响应"}";

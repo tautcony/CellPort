@@ -77,6 +77,23 @@ public static class ModuleScanner
     private static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(12);
 
     /// <summary>
+    /// Resolve the physical USB identity from current PnP parent, container, and location-path
+    /// properties. This scan is uncached so it can be used immediately after re-enumeration.
+    /// </summary>
+    public static WindowsModuleResolution ScanPhysicalIdentity(Guid? selectedContainerId = null) =>
+        WindowsModuleIdentityResolver.Resolve(WindowsUsbDeviceEnumerator.EnumeratePresent(), selectedContainerId);
+
+    /// <summary>Invalidates the legacy interface scan cache after a PnP topology change.</summary>
+    public static void InvalidateCache()
+    {
+        lock (_lock)
+        {
+            _cached = null;
+            _cachedAt = DateTime.MinValue;
+        }
+    }
+
+    /// <summary>
     /// 扫描当前系统中的模块接口。
     /// 
     /// 结果会做短期缓存（5 秒），避免界面频繁刷新时反复触发 WMI 查询。

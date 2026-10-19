@@ -104,15 +104,15 @@ if (profiles is { Count: > 1 })
     else
     {
         Log($"\n--- 切卡测试：启用 {target.DisplayName} ---");
-        var en = await es10.SetProfileStateAsync(target.IsdpAid!, true, cts2.Token);
+        var en = await modem.SetEsimProfileStateAsync(target.IsdpAid!, true, cts2.Token);
         Log($"EnableProfile => Ok={en.Ok} Code={en.Code} ({en.Message})");
 
         if (!en.Ok)
         {
             // 部分老卡不支持隐式停用，先停用当前再启用
-            var dis = await es10.SetProfileStateAsync(current.IsdpAid!, false, cts2.Token);
+            var dis = await modem.SetEsimProfileStateAsync(current.IsdpAid!, false, cts2.Token);
             Log($"先停用 {current.DisplayName} => Ok={dis.Ok} Code={dis.Code} ({dis.Message})");
-            en = await es10.SetProfileStateAsync(target.IsdpAid!, true, cts2.Token);
+            en = await modem.SetEsimProfileStateAsync(target.IsdpAid!, true, cts2.Token);
             Log($"重试启用 => Ok={en.Ok} Code={en.Code} ({en.Message})");
         }
 
@@ -126,13 +126,13 @@ if (profiles is { Count: > 1 })
 
         // ---- 恢复原状 ----
         Log($"--- 恢复：启用 {current.DisplayName} ---");
-        var back = await es10.SetProfileStateAsync(current.IsdpAid!, true, cts2.Token);
+        var back = await modem.SetEsimProfileStateAsync(current.IsdpAid!, true, cts2.Token);
         Log($"EnableProfile => Ok={back.Ok} Code={back.Code} ({back.Message})");
 
         if (targetNow?.Enabled ?? false)
         {
             // 多激活卡不会自动停用测试目标，显式停掉以还原
-            var disT = await es10.SetProfileStateAsync(target.IsdpAid!, false, cts2.Token);
+            var disT = await modem.SetEsimProfileStateAsync(target.IsdpAid!, false, cts2.Token);
             Log($"停用测试目标 {target.DisplayName} => Ok={disT.Ok} Code={disT.Code} ({disT.Message})");
         }
 

@@ -1,0 +1,42 @@
+{
+  "fixtureVersion": 1,
+  "fixtureName": "redacted-readonly-baseline",
+  "source": "openspec/changes/add-cross-platform-call-audio/design.md",
+  "synthetic": true,
+  "redactions": {
+    "clccNumbers": "Replaced with the literal <redacted>.",
+    "adbTransportId": "Replaced with the synthetic value 42.",
+    "deviceSerial": "Omitted.",
+    "bootId": "Omitted.",
+    "ownerToken": "Omitted."
+  },
+  "adb": {
+    "serial": "?",
+    "serialReliable": false,
+    "state": "device",
+    "transportId": 42,
+    "transportIdSynthetic": true,
+    "selectionRule": "A question-mark serial is not a stable identity; use only a currently verified transport after physical association."
+  },
+  "clcc": {
+    "queryOutcome": "success",
+    "response": [
+      "AT+CLCC",
+      "+CLCC: 1,1,0,1,0,\"<redacted>\",128",
+      "+CLCC: 2,1,0,1,0,\"<redacted>\",128",
+      "OK"
+    ],
+    "expected": {
+      "entryCount": 2,
+      "activeVoiceCallCount": 0,
+      "nonVoiceOccupancyCount": 2,
+      "usbPreparationAllowed": false,
+      "automaticHangupAllowed": false
+    }
+  },
+  "usbOriginalValues": {
+    "functions": "diag,serial,rmnet,ffs",
+    "enable": "1",
+    "audio_enable": "0"
+  }
+}

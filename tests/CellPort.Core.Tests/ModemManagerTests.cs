@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Text;
+using CellPort.Audio.Core.Models;
+using CellPort.Audio.Core.Services;
+using CellPort.Core.At;
 using CellPort.Core.Services;
 using CellPort.Core.Transport;
 using Xunit;
@@ -117,10 +120,76 @@ public class ModemManagerTests
     }
 
     [Fact]
+    public async Task ModemManagerSharesAudioAdmissionForLegacyWritesAndKeepsReadOnlyAndCallControlAvailable()
+    {
+        var channel = new FakeChannel(AtChannelKind.UsbDirect);
+        var provider = new FakeProvider { Usb = channel };
+        await using var modem = new ModemManager(provider);
+        await using var coordinator = new DeviceOperationCoordinator();
+        modem.OperationAdmission = coordinator;
+        Assert.True(await modem.ConnectAsync());
+
+        var tracker = new CallTracker();
+        var moduleGeneration = tracker.BeginModuleSession();
+        var empty = tracker.Apply(new ClccCallListResult(ClccQueryOutcome.Complete, []));
+        var preparing = await coordinator.TryAcquireAsync(new DeviceOperationRequest(
+            DeviceOperationKind.AudioPrepare, empty, moduleGeneration));
+        Assert.True(preparing.Succeeded);
+        var prepareLease = preparing.Lease!;
+        await using (prepareLease)
+            prepareLease.CommitAudioSessionOwnership();
+
+        var commandCount = channel.Commands.Count;
+        Assert.False(await modem.SendSmsAsync("+10000000000", "fixture"));
+        foreach (var command in new[]
+                 {
+                     "AT+CGLA=1,2,00",
+                     "AT+CFUN=1,1",
+                     "AT+QCFG=\"usbnet\",0",
+                     "AT+QNETDEVCTL=0,0,1",
+                     "AT+VENDOR=destructive",
+                 })
+        {
+            var result = await modem.ExecuteAtAsync(command);
+            Assert.False(result.Succeeded);
+            Assert.Equal(AtCompletionStatus.OperationRejected, result.Completion);
+            Assert.Contains("OperationConflict", result.RawText);
+        }
+        Assert.Equal(commandCount, channel.Commands.Count);
+
+        var readOnly = await modem.ExecuteAtAsync("AT+CGMM");
+        Assert.True(readOnly.Succeeded);
+        Assert.Contains("AT+CGMM", channel.Commands);
+
+        Assert.True(await modem.HangUpAsync());
+        Assert.Contains("AT+CHUP", channel.Commands);
+
+        var release = await coordinator.TryAcquireAsync(new DeviceOperationRequest(DeviceOperationKind.AudioRelease));
+        Assert.True(release.Succeeded);
+        var releaseLease = release.Lease!;
+        await using (releaseLease)
+            releaseLease.CommitVerifiedRestore();
+
+        var networkChange = await modem.ExecuteAtAsync("AT+QCFG=\"usbnet\",0");
+        Assert.True(networkChange.Succeeded);
+    }
+
+    [Theory]
+    [InlineData("AT+CGLA=1,2,00", ModuleOperationKind.EsimModification)]
+    [InlineData("AT+CFUN=1,1", ModuleOperationKind.CfunChange)]
+    [InlineData("AT+CHUP", ModuleOperationKind.CallControl)]
+    [InlineData("AT+CGMM", ModuleOperationKind.ReadOnlyQuery)]
+    [InlineData("AT+VENDOR=destructive", ModuleOperationKind.RawConsoleCommand)]
+    public void AtConsoleCommandsAreConservativelyClassified(string command, ModuleOperationKind expected)
+    {
+        Assert.Equal(expected, ModemManager.ClassifyAtCommand(command).Kind);
+    }
+
+    [Fact]
     public void CoreHasNoPlatformImplementationDependency()
     {
         var core = typeof(ModemManager).Assembly;
-        Assert.Equal(".NETCoreApp,Version=v9.0", core.GetCustomAttribute<TargetFrameworkAttribute>()!.FrameworkName);
+        Assert.Equal(".NETCoreApp,Version=v10.0", core.GetCustomAttribute<TargetFrameworkAttribute>()!.FrameworkName);
         Assert.DoesNotContain(core.GetReferencedAssemblies(), a =>
             a.Name is "System.Management" or "System.IO.Ports" or "PresentationFramework" ||
             a.Name!.StartsWith("CellPort.Platform.") || a.Name.StartsWith("CellPort.Transport."));

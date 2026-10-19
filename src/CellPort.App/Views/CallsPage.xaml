@@ -56,6 +56,15 @@
                                    VerticalAlignment="Center"
                                    Style="{StaticResource DimText}" />
                     </StackPanel>
+
+                    <TextBlock x:Name="AudioAvailabilityText"
+                               Text="通话音频：不可用（尚无已验证的设备运行时）"
+                               Margin="0,8,0,0"
+                               Style="{StaticResource DimText}" />
+                    <TextBlock x:Name="AudioSessionText"
+                               Text="通话控制可用；媒体通路不可用（仅控制）"
+                               Margin="0,4,0,0"
+                               Style="{StaticResource DimText}" />
                 </StackPanel>
 
                 <!-- 通话中按键 -->

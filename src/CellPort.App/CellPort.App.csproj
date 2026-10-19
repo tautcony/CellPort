@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CellPort.Platform.Windows\CellPort.Platform.Windows.csproj" />
+    <ProjectReference Include="..\CellPort.Audio.Core\CellPort.Audio.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
