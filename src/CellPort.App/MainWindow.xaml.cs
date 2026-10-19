@@ -1,3 +1,5 @@
+using CellPort.Platform.Windows;
+using CellPort.Transport.Serial;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -12,7 +14,7 @@ namespace CellPort.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    private readonly ModemManager _modem = new();
+    private readonly ModemManager _modem = new(new WindowsAtChannelProvider());
     private readonly Dictionary<string, UserControl> _pages = [];
     private readonly DispatcherTimer _refreshTimer = new();
     private string _currentPage = "Sms";
@@ -207,7 +209,7 @@ public partial class MainWindow : Window
             var ok = await _modem.ConnectAsync();
             if (!ok)
             {
-                var scan = Core.Transport.ModuleScanner.Scan(bypassCache: true);
+                var scan = ModuleScanner.Scan(bypassCache: true);
 
                 var result = MessageBox.Show(
                     "未能连接到模块。\n\n" +
@@ -245,7 +247,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var scan = Core.Transport.ModuleScanner.Scan();
+            var scan = ModuleScanner.Scan();
             MessageBox.Show(scan.Describe(), "设备诊断",
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }

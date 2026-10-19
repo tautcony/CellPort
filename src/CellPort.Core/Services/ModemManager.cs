@@ -10,6 +10,13 @@ namespace CellPort.Core.Services;
 /// </summary>
 public sealed class ModemManager : IAsyncDisposable
 {
+    private readonly IAtChannelProvider _channels;
+
+    public ModemManager(IAtChannelProvider channels)
+    {
+        _channels = channels ?? throw new ArgumentNullException(nameof(channels));
+    }
+
     private AtEngine? _engine;
     private CancellationTokenSource? _pumpCts;
     private Task? _pumpTask;
@@ -40,7 +47,7 @@ public sealed class ModemManager : IAsyncDisposable
                 continue;
             }
 
-            _portHints.RemoveAll(p => string.Equals(p, h, StringComparison.OrdinalIgnoreCase));
+            _portHints.RemoveAll(p => _channels.PortNameComparer.Equals(p, h));
             _portHints.Add(h);
         }
     }
@@ -132,7 +139,7 @@ public sealed class ModemManager : IAsyncDisposable
         Trace("[1/5] 尝试 USB 直控（WinUSB）…");
         try
         {
-            var usbTask = UsbAtChannel.TryOpenAsync(ct);
+            var usbTask = _channels.TryOpenUsbAsync(ct);
             var done = await Task.WhenAny(usbTask, Task.Delay(TimeSpan.FromSeconds(4), ct))
                 .ConfigureAwait(false);
             if (done == usbTask)
@@ -170,7 +177,7 @@ public sealed class ModemManager : IAsyncDisposable
             else
             {
                 Trace("[2/5] 自动探测串口…");
-                var detectTask = AutoDetectSerialAsync(_portHints, ct);
+                var detectTask = _channels.DetectSerialAsync(_portHints, ct);
                 var done2 = await Task.WhenAny(detectTask, Task.Delay(TimeSpan.FromSeconds(20), ct))
                     .ConfigureAwait(false);
                 port = done2 == detectTask
@@ -181,11 +188,11 @@ public sealed class ModemManager : IAsyncDisposable
 
             if (port is not null)
             {
-                channel = new SerialAtChannel(port);
+                channel = _channels.CreateSerial(port);
 
                 // 记住成功端口：进程内提到列表首位，并通知宿主持久化。
                 _portHints.RemoveAll(p =>
-                    string.Equals(p, port, StringComparison.OrdinalIgnoreCase));
+                    _channels.PortNameComparer.Equals(p, port));
                 _portHints.Insert(0, port);
                 if (_portHints.Count > 4)
                 {
@@ -361,248 +368,6 @@ public sealed class ModemManager : IAsyncDisposable
                 // 泵不因单次异常退出
             }
         }
-    }
-
-    /// <summary>
-    /// 自动探测可能承载 AT 通道的串口。
-    /// 
-    /// 实测环境（大疆一代 QDC507 + Quectel 驱动，本机 COM4~COM9）：
-    ///   · COM4 = DM Port（诊断口）  → 可打开，但不回 AT
-    ///   · COM5 = NMEA Port          → 可打开，但不回 AT
-    ///   · COM6 = AT Port            → 回复 "AT\r\r\nOK\r\n"
-    ///   · COM7 = 同一 AT 口的另一实例 → 同样回 OK（热插拔后会在这两个号之间漂移）
-    ///   · COM8/COM9 = 蓝牙虚拟串口   → 与模块无关，应排除
-    ///
-    /// 因此策略为两段式：
-    ///   1. 「已知端口」先行：把上次成功的口放在最前面，单个探测（约 50ms）即可命中，
-    ///      这是启动秒连的关键路径；
-    ///   2. 未命中时才做全量并行探测：对系统串口并行发 AT，谁先回 OK 用谁。
-    ///      蓝牙口（BTHENUM / 描述含「蓝牙」「Bluetooth」）直接剔除，避免无谓等待。
-    /// </summary>
-    /// <param name="knownPorts">
-    /// 历史成功端口，按优先级排列（最新的在前）。可为空。
-    /// </param>
-    private static async Task<string?> AutoDetectSerialAsync(
-        IReadOnlyList<string> knownPorts, CancellationToken ct)
-    {
-        var candidates = SerialAtChannel.EnumerateCandidates();
-        if (candidates.Count == 0)
-        {
-            return null;
-        }
-
-        // ---- 第 1 段：已知端口优先（秒连路径）----
-        foreach (var known in knownPorts)
-        {
-            if (ct.IsCancellationRequested)
-            {
-                return null;
-            }
-
-            var exists = candidates.Any(c =>
-                string.Equals(c.PortName, known, StringComparison.OrdinalIgnoreCase));
-            if (!exists)
-            {
-                continue;
-            }
-
-            var hit = await ProbePortAsync(known, ct).ConfigureAwait(false);
-            if (hit is not null)
-            {
-                return hit;
-            }
-        }
-
-        // ---- 第 2 段：全量并行探测 ----
-        // 剔除明显无关的端口：蓝牙虚拟串口、以及没有对应模块 PnP 实例的可疑端口。
-        var suspect = new HashSet<string>(knownPorts, StringComparer.OrdinalIgnoreCase);
-        var candidatesToTry = candidates
-            .Where(c => !IsBluetoothPort(c.PortName))
-            .Where(c => !suspect.Contains(c.PortName))
-            .ToList();
-
-        if (candidatesToTry.Count == 0)
-        {
-            return null;
-        }
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(15));
-
-        var tasks = candidatesToTry
-            .Select(c => ProbePortAsync(c.PortName, cts.Token))
-            .ToList();
-
-        while (tasks.Count > 0)
-        {
-            var finished = await Task.WhenAny(tasks).ConfigureAwait(false);
-            tasks.Remove(finished);
-
-            try
-            {
-                var port = await finished.ConfigureAwait(false);
-                if (port is not null)
-                {
-                    // 不取消其余任务：ProbePortAsync 内部用 await using 管理通道，
-                    // 让它们自然结束后自行释放，避免提前取消导致串口句柄未归还
-                    // （实测提前 Cancel 会让紧接着的真实连接报「资源被占用」）。
-                    return port;
-                }
-            }
-            catch
-            {
-                // 该端口探测失败，继续等下一个
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// 判断某端口是否为蓝牙虚拟串口。这类端口由系统常驻，与模块无关，
-    /// 对其发 AT 必然超时，属于纯粹的浪费。
-    /// 判定依据：Win32_PnPEntity 的 DeviceID 以 BTHENUM 开头。
-    /// 为避免每次连接都跑 WMI，结果带 30 秒缓存。
-    /// </summary>
-    private static bool IsBluetoothPort(string portName)
-    {
-        var map = GetPortFriendlyMap();
-        return map.TryGetValue(portName, out var id) &&
-               id.StartsWith("BTHENUM", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static Dictionary<string, string>? _portMapCache;
-    private static DateTime _portMapCachedAt = DateTime.MinValue;
-    private static readonly object _portMapLock = new();
-
-    /// <summary>
-    /// 建立「COM 口名 → PnP DeviceID」映射，用于识别端口所属设备类型。
-    /// 查询带超时与缓存；失败时返回空表（调用方按「非蓝牙」处理，不影响主流程）。
-    /// </summary>
-    private static Dictionary<string, string> GetPortFriendlyMap()
-    {
-        lock (_portMapLock)
-        {
-            if (_portMapCache is not null &&
-                DateTime.UtcNow - _portMapCachedAt < TimeSpan.FromSeconds(30))
-            {
-                return _portMapCache;
-            }
-
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                var task = Task.Run(() =>
-                {
-                    var local = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    using var searcher = new System.Management.ManagementObjectSearcher(
-                        "SELECT Name, DeviceID FROM Win32_PnPEntity WHERE Name LIKE '%(COM%'");
-                    foreach (var o in searcher.Get())
-                    {
-                        var name = o["Name"]?.ToString();
-                        var id = o["DeviceID"]?.ToString();
-                        var port = ExtractPortName(name);
-                        if (port is not null && id is not null)
-                        {
-                            local[port] = id;
-                        }
-                    }
-                    return local;
-                });
-
-                if (task.Wait(TimeSpan.FromSeconds(5)))
-                {
-                    map = task.Result;
-                }
-            }
-            catch
-            {
-                // WMI 不可用时退化为空表
-            }
-
-            _portMapCache = map;
-            _portMapCachedAt = DateTime.UtcNow;
-            return map;
-        }
-    }
-
-    /// <summary>从「Quectel USB AT Port (COM6)」这类友好名中取出 COM6。</summary>
-    private static string? ExtractPortName(string? friendlyName)
-    {
-        if (string.IsNullOrEmpty(friendlyName))
-        {
-            return null;
-        }
-
-        var open = friendlyName.LastIndexOf("(COM", StringComparison.OrdinalIgnoreCase);
-        if (open < 0)
-        {
-            return null;
-        }
-
-        var close = friendlyName.IndexOf(')', open);
-        if (close < 0)
-        {
-            return null;
-        }
-
-        return friendlyName.Substring(open + 1, close - open - 1).Trim();
-    }
-
-    /// <summary>
-    /// 探测单个串口是否为 AT 通道。
-    /// </summary>
-    private static async Task<string?> ProbePortAsync(string portName, CancellationToken ct)
-    {
-        try
-        {
-            var ch = new SerialAtChannel(portName);
-            await using (ch)
-            {
-                // OpenAsync 内部已带超时保护，不可用端口会快速抛出。
-                await ch.OpenAsync(ct).ConfigureAwait(false);
-
-                // 发送探测指令；部分固件需要两次往返才回 OK
-                for (int attempt = 0; attempt < 3; attempt++)
-                {
-                    if (ct.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
-                    await ch.WriteAsync("AT\r"u8.ToArray(), ct).ConfigureAwait(false);
-
-                    var buf = new byte[256];
-                    var sw = System.Diagnostics.Stopwatch.StartNew();
-                    var sb = new System.Text.StringBuilder();
-
-                    while (sw.ElapsedMilliseconds < 800 && !ct.IsCancellationRequested)
-                    {
-                        var read = await ch.ReadAsync(buf, TimeSpan.FromMilliseconds(200), ct)
-                            .ConfigureAwait(false);
-                        if (read <= 0)
-                        {
-                            continue;
-                        }
-                        sb.Append(System.Text.Encoding.ASCII.GetString(buf, 0, read));
-
-                        if (sb.ToString().Contains("OK", StringComparison.OrdinalIgnoreCase))
-                        {
-                            return portName;
-                        }
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // 整体超时，交由调用方处理
-        }
-        catch
-        {
-            // 端口不可用（被占用、不存在、打开超时等），跳过
-        }
-        return null;
     }
 
     public async ValueTask DisposeAsync()

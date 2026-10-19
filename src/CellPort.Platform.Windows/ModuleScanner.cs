@@ -1,6 +1,7 @@
+using CellPort.Core.Transport;
 using System.Diagnostics;
 
-namespace CellPort.Core.Transport;
+namespace CellPort.Platform.Windows;
 
 /// <summary>
 /// 模块发现结果。

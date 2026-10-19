@@ -1,9 +1,10 @@
+using CellPort.Core.Transport;
 using System.IO.Ports;
 
-namespace CellPort.Core.Transport;
+namespace CellPort.Transport.Serial;
 
 /// <summary>
-/// 基于 Windows 串口的 AT 通道。
+/// 基于 System.IO.Ports 的 AT 通道。
 /// 需要设备已绑定 Quectel AT 驱动并生成 COM 口（例如 "Quectel USB AT Port"）。
 /// </summary>
 public sealed class SerialAtChannel : IAtChannel

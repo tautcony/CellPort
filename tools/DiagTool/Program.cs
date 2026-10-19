@@ -1,3 +1,5 @@
+using CellPort.Platform.Windows;
+using CellPort.Transport.Serial;
 using CellPort.Core.At;
 using CellPort.Core.Services;
 using CellPort.Core.Transport;
@@ -66,7 +68,7 @@ if (preferredPort is not null)
     Console.WriteLine($"    使用指定串口：{preferredPort}");
 }
 
-await using var modem = new ModemManager();
+await using var modem = new ModemManager(new WindowsAtChannelProvider());
 
 // 实时打印连接阶段诊断，便于定位卡点（自动 flush，避免缓冲导致看不到进度）
 modem.TraceMessage += (_, msg) =>

@@ -1,3 +1,5 @@
+using CellPort.Platform.Windows;
+using CellPort.Transport.Serial;
 // 端到端验证：用与 WPF 程序完全相同的核心库执行一次完整业务流
 // （连接 → 状态 → 短信列表 → AT 控制台 → 断开），确认 App 侧可用。
 using CellPort.Core.At;
@@ -6,7 +8,7 @@ using CellPort.Core.Services;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.WriteLine("=== CellPort 核心库端到端验证 ===\n");
 
-await using var modem = new ModemManager();
+await using var modem = new ModemManager(new WindowsAtChannelProvider());
 
 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 

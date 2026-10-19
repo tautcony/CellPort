@@ -1,3 +1,5 @@
+using CellPort.Platform.Windows;
+using CellPort.Transport.Serial;
 using System.Text;
 using CellPort.Core.Models;
 using CellPort.Core.Services;
@@ -12,7 +14,7 @@ void Log(string s) { Console.WriteLine(s); log.AppendLine(s); Console.Out.Flush(
 
 Log("=== 验证逻辑通道 eUICC 读取（CCHO / CGLA）===");
 
-await using var modem = new ModemManager();
+await using var modem = new ModemManager(new WindowsAtChannelProvider());
 modem.TraceMessage += (_, m) => { };
 
 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(40));

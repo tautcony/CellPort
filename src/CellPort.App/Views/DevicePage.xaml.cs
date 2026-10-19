@@ -1,3 +1,5 @@
+using CellPort.Platform.Windows;
+using CellPort.Transport.Serial;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;

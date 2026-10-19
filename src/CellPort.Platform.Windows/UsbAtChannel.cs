@@ -1,6 +1,7 @@
+using CellPort.Core.Transport;
 using System.Runtime.InteropServices;
 
-namespace CellPort.Core.Transport;
+namespace CellPort.Platform.Windows;
 
 /// <summary>
 /// 通过 Windows 原生 WinUSB API 直接访问模块的 AT 接口。

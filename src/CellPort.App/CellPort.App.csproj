@@ -18,7 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CellPort.Core\CellPort.Core.csproj" />
+    <ProjectReference Include="..\CellPort.Platform.Windows\CellPort.Platform.Windows.csproj" />
   </ItemGroup>
 
   <ItemGroup>
