@@ -6,6 +6,7 @@ publish/
 /build/
 *.user
 *.suo
+.run/
 
 # Runtime / debug outputs (may contain real device data)
 probe-verify.txt
@@ -16,6 +17,8 @@ uia-*.txt
 
 # Local workspace data
 .workbuddy/
+.idea/
+.vscode/
 
 # OS noise
 Thumbs.db

@@ -27,7 +27,8 @@ public sealed class DevicePageTests
 
         var qdcDevice = new[] { "QDC507 · 2CA3:4006" };
         Assert.Equal("QDC507 · 2CA3:4006", PlatformServices.FormatMacDiagnostics(qdcDevice, []));
-        Assert.Equal("QDC507 未响应。", PlatformServices.DescribeConnectionFailure(null, [], qdcDevice));
+        var qdcFailure = OperatingSystem.IsMacOS() ? "QDC507 未响应。" : "未发现串口。";
+        Assert.Equal(qdcFailure, PlatformServices.DescribeConnectionFailure(null, [], qdcDevice));
         Assert.Equal("未发现设备。", PlatformServices.FormatMacDiagnostics([], []));
 
         var disappeared = PlatformServices.DescribeConnectionFailure("/dev/cu.old", ["/dev/cu.current"]);

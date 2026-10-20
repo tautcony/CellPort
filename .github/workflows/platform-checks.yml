@@ -47,7 +47,9 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Build macOS host and adapter
-        run: dotnet build CellPort.Mac.slnf -c Release --nologo
+        run: dotnet build CellPort.slnx -c Release -p:EnableWindowsTargeting=true --nologo
+      - name: Install libusb
+        run: brew install libusb
       - name: Package self-contained app
         run: bash scripts/publish-mac.sh
       - name: Cross-publish canonical Windows app
