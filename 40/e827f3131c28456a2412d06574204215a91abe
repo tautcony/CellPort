@@ -1,0 +1,54 @@
+openspec/changes/migrate-wpf-to-avalonia/design.md
+  s_a4874047b1f977::t_0a47a9feb41805 17
+docs/macos.md
+  s_a4874047b1f977::t_5eaf1f896fab78 19-20,69
+  s_a4874047b1f977::t_0a47a9feb41805 16,21,66
+docs/platform-boundaries.md
+  s_a4874047b1f977::t_0a47a9feb41805 3,13,35,45,56
+CellPort.slnx
+  s_a4874047b1f977::t_0cfa7440fb72cd 1-30
+docs/avalonia-migration.md
+  s_a4874047b1f977::t_5eaf1f896fab78 33
+  s_a4874047b1f977::t_0a47a9feb41805 3,25-26,34
+README.en.md
+  s_a455b3ce60de9e::t_474909fbee5f76 52
+  s_a455b3ce60de9e::t_0321edf112c736 5,14-15,18-20,22,31,33,35-37,39,41,43,45,48-49,54,56-59,61,63-66,68,70,72-74,76,78-79
+  s_a455b3ce60de9e::t_ffd0d8bc131d97 16-17,24,26-29
+README.md
+  s_a455b3ce60de9e::t_f24ab734eaea46 16,24,26,28-29
+  s_a455b3ce60de9e::t_474909fbee5f76 52
+  s_a455b3ce60de9e::t_fac39564457663 68
+  s_a455b3ce60de9e::t_c71b28bd0f3623 3,5,12,14-15,17-20,22,31,33,35-37,41,45,48,54,56-58,61,63-66,70,72-74,76,78-79
+.github/workflows/platform-checks.yml
+  s_a4874047b1f977::t_0a47a9feb41805 26,70
+  s_a4874047b1f977::t_5fdf68b9c93935 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "40e827f3131c28456a2412d06574204215a91abe",
+  "prompts": {},
+  "humans": {
+    "h_3705811fa4502c": {
+      "author": "TautCony <i@tautcony.xyz>"
+    }
+  },
+  "sessions": {
+    "s_a455b3ce60de9e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15844-34e2-7f72-93ea-cafdb62016b3",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    },
+    "s_a4874047b1f977": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1583a-fd0b-7b80-83f2-5432e1645815",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    }
+  }
+}
