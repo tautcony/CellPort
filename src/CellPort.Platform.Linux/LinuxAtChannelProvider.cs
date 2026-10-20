@@ -47,52 +47,22 @@ public sealed class LinuxAtChannelProvider : IAtChannelProvider
     {
         ArgumentNullException.ThrowIfNull(knownPorts);
         var candidates = await Task.Run(EnumerateSerialPorts, ct).ConfigureAwait(false);
-        var ordered = knownPorts.Where(port => candidates.Contains(port, StringComparer.Ordinal))
-            .Concat(GetModulePorts().Where(port => candidates.Contains(port, StringComparer.Ordinal)))
-            .Concat(candidates)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        if (ordered.Length == 0) return null;
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        foreach (var port in ordered)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (timeout.IsCancellationRequested) return null;
-            try
-            {
-                await using var channel = CreateSerial(port);
-                await channel.OpenAsync(timeout.Token).ConfigureAwait(false);
-                for (var attempt = 0; attempt < 2; attempt++)
-                {
-                    await channel.WriteAsync("AT\r"u8.ToArray(), timeout.Token).ConfigureAwait(false);
-                    var response = new StringBuilder();
-                    var buffer = new byte[256];
-                    var watch = Stopwatch.StartNew();
-                    while (watch.Elapsed < TimeSpan.FromMilliseconds(700))
-                    {
-                        timeout.Token.ThrowIfCancellationRequested();
-                        var count = await channel.ReadAsync(buffer, TimeSpan.FromMilliseconds(150), timeout.Token)
-                            .ConfigureAwait(false);
-                        response.Append(Encoding.ASCII.GetString(buffer, 0, count));
-                        if (response.ToString().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                            .Any(line => line.Trim() == "OK"))
-                            return port;
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                return null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException
-                                      or InvalidOperationException)
-            {
-                // A busy, unplugged or non-AT port must not stop discovery of other ports.
-            }
-        }
-        return null;
+        // 高优先级：上次成功的端口 → 已知模块的 AT 节点；其余候选并发兜底。
+        var priority = knownPorts.Where(port => candidates.Contains(port, StringComparer.Ordinal))
+            .Concat(GetModulePorts().Where(port => candidates.Contains(port, StringComparer.Ordinal)))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (priority.Count == 0 && candidates.Count == 0) return null;
+
+        var ordered = priority
+            .Concat(candidates.Where(port => !priority.Contains(port, StringComparer.Ordinal)))
+            .ToArray();
+
+        return await AtPortProbe.FindAsync(
+            CreateSerial, ordered, priority.Count, TimeSpan.FromSeconds(15),
+            AtPortProbe.DefaultConcurrency, ct).ConfigureAwait(false);
     }
 
     private IReadOnlyList<string> GetModulePorts() => _catalog.EnumerateModules()

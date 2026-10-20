@@ -35,7 +35,8 @@ public sealed class WindowsAtChannelProvider : IAtChannelProvider
     public async Task<string?> DetectSerialAsync(
         IReadOnlyList<string> knownPorts, CancellationToken ct)
     {
-        var candidates = SerialAtChannel.EnumerateCandidates();
+        // 异步枚举：串口枚举在部分机器上会阻塞数秒，不能占用调用线程。
+        var candidates = await SerialAtChannel.EnumerateCandidatesAsync(ct: ct).ConfigureAwait(false);
         if (candidates.Count == 0)
         {
             return null;
@@ -66,8 +67,9 @@ public sealed class WindowsAtChannelProvider : IAtChannelProvider
         // ---- 第 2 段：全量并行探测 ----
         // 剔除明显无关的端口：蓝牙虚拟串口、以及没有对应模块 PnP 实例的可疑端口。
         var suspect = new HashSet<string>(knownPorts, StringComparer.OrdinalIgnoreCase);
+        var portMap = await GetPortFriendlyMapAsync(ct).ConfigureAwait(false);
         var candidatesToTry = candidates
-            .Where(c => !IsBluetoothPort(c.PortName))
+            .Where(c => !IsBluetoothPort(c.PortName, portMap))
             .Where(c => !suspect.Contains(c.PortName))
             .ToList();
 
@@ -93,9 +95,11 @@ public sealed class WindowsAtChannelProvider : IAtChannelProvider
                 var port = await finished.ConfigureAwait(false);
                 if (port is not null)
                 {
-                    // 不取消其余任务：ProbePortAsync 内部用 await using 管理通道，
-                    // 让它们自然结束后自行释放，避免提前取消导致串口句柄未归还
-                    // （实测提前 Cancel 会让紧接着的真实连接报「资源被占用」）。
+                    // 取消并等待同批探测收尾，再把命中端口交给真实连接流程。
+                    // 只依赖“自然结束”会让同一设备的别名端口短暂占用同一接口。
+                    await cts.CancelAsync().ConfigureAwait(false);
+                    try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+                    catch { /* 每个候选独立失败；命中结果仍有效。 */ }
                     return port;
                 }
             }
@@ -114,66 +118,79 @@ public sealed class WindowsAtChannelProvider : IAtChannelProvider
     /// 判定依据：Win32_PnPEntity 的 DeviceID 以 BTHENUM 开头。
     /// 为避免每次连接都跑 WMI，结果带 30 秒缓存。
     /// </summary>
-    private static bool IsBluetoothPort(string portName)
+    private static bool IsBluetoothPort(string portName, IReadOnlyDictionary<string, string> portMap)
     {
-        var map = GetPortFriendlyMap();
-        return map.TryGetValue(portName, out var id) &&
+        return portMap.TryGetValue(portName, out var id) &&
                id.StartsWith("BTHENUM", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Dictionary<string, string>? _portMapCache;
     private static DateTime _portMapCachedAt = DateTime.MinValue;
-    private static readonly object _portMapLock = new();
+    private static readonly SemaphoreSlim PortMapGate = new(1, 1);
 
     /// <summary>
     /// 建立「COM 口名 → PnP DeviceID」映射，用于识别端口所属设备类型。
     /// 查询带超时与缓存；失败时返回空表（调用方按「非蓝牙」处理，不影响主流程）。
+    /// WMI 查询本身是同步的，这里放到线程池并异步等待，避免阻塞界面线程。
     /// </summary>
-    private static Dictionary<string, string> GetPortFriendlyMap()
+    private static async Task<Dictionary<string, string>> GetPortFriendlyMapAsync(CancellationToken ct)
     {
-        lock (_portMapLock)
+        if (_portMapCache is { } cached &&
+            DateTime.UtcNow - _portMapCachedAt < TimeSpan.FromSeconds(30))
         {
-            if (_portMapCache is not null &&
+            return cached;
+        }
+
+        await PortMapGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_portMapCache is { } fresh &&
                 DateTime.UtcNow - _portMapCachedAt < TimeSpan.FromSeconds(30))
             {
-                return _portMapCache;
+                return fresh;
             }
 
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                var task = Task.Run(() =>
-                {
-                    var local = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    using var searcher = new System.Management.ManagementObjectSearcher(
-                        "SELECT Name, DeviceID FROM Win32_PnPEntity WHERE Name LIKE '%(COM%'");
-                    foreach (var o in searcher.Get())
-                    {
-                        var name = o["Name"]?.ToString();
-                        var id = o["DeviceID"]?.ToString();
-                        var port = ExtractPortName(name);
-                        if (port is not null && id is not null)
-                        {
-                            local[port] = id;
-                        }
-                    }
-                    return local;
-                });
-
-                if (task.Wait(TimeSpan.FromSeconds(5)))
-                {
-                    map = task.Result;
-                }
+                map = await Task.Run(QueryPortMap, ct)
+                    .WaitAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch
             {
-                // WMI 不可用时退化为空表
+                // WMI 不可用或超时：退化为空表
             }
 
             _portMapCache = map;
             _portMapCachedAt = DateTime.UtcNow;
             return map;
         }
+        finally
+        {
+            PortMapGate.Release();
+        }
+    }
+
+    private static Dictionary<string, string> QueryPortMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var searcher = new System.Management.ManagementObjectSearcher(
+            "SELECT Name, DeviceID FROM Win32_PnPEntity WHERE Name LIKE '%(COM%'");
+        foreach (var o in searcher.Get())
+        {
+            var name = o["Name"]?.ToString();
+            var id = o["DeviceID"]?.ToString();
+            var port = ExtractPortName(name);
+            if (port is not null && id is not null)
+            {
+                map[port] = id;
+            }
+        }
+        return map;
     }
 
     /// <summary>从「Quectel USB AT Port (COM6)」这类友好名中取出 COM6。</summary>

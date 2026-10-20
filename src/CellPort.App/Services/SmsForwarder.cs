@@ -19,6 +19,14 @@ public sealed class SmsForwarder
         ArgumentNullException.ThrowIfNull(message);
 
         var settings = AppSettings.Current;
+
+        // 转发是「显式开启才算数」的能力：默认关闭，避免把验证码等敏感短信
+        // 在用户不知情的情况下外发。
+        if (!settings.SmsForwardingEnabled || !settings.HasForwardingTarget)
+        {
+            return;
+        }
+
         var notification = $"新短信\n发件人：{message.Number}\n{message.Body}";
         var tasks = new List<Task>(3);
 

@@ -63,9 +63,9 @@ internal sealed class PrioritizedCommandLock : IDisposable
                 return null;
             }
 
-            return waiter.State == WaiterState.Granted
-                ? waiter.Completion.Task.GetAwaiter().GetResult()
-                : null;
+            // 已授权但 TCS 可能尚未完成。租约在授权时（同一把锁内）就已创建，
+            // 这里直接取走即可——不能同步等待 TCS，否则会在持锁状态阻塞线程。
+            return waiter.State == WaiterState.Granted ? waiter.Lease : null;
         }
     }
 
@@ -83,6 +83,8 @@ internal sealed class PrioritizedCommandLock : IDisposable
                     continue;
                 }
 
+                // 先建租约再置状态：保证任何观察到 Granted 的一方都能读到非空租约。
+                next.Lease = new Lease(this);
                 next.State = WaiterState.Granted;
                 granted = next;
                 break;
@@ -95,7 +97,7 @@ internal sealed class PrioritizedCommandLock : IDisposable
             }
         }
 
-        granted.Completion.TrySetResult(new Lease(this));
+        granted.Completion.TrySetResult(granted.Lease!);
     }
 
     public void Dispose()
@@ -136,6 +138,7 @@ internal sealed class PrioritizedCommandLock : IDisposable
         public CancellationToken CancellationToken { get; } = cancellationToken;
         public TaskCompletionSource<Lease> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Lease? Lease { get; set; }
         public WaiterState State { get; set; } = WaiterState.Queued;
     }
 

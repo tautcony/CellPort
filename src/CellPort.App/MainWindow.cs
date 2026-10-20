@@ -24,7 +24,9 @@ public sealed class MainWindow : Window
     private readonly Avalonia.Controls.Shapes.Ellipse _connectionDot = new() { Name = "ConnectionDot", Width = 8, Height = 8, Fill = Brushes.Gray, VerticalAlignment = VerticalAlignment.Center };
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _callPollTimer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly DispatcherTimer _smsPollTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    // 新短信由 +CMTI 主动上报触发按索引读取；这里的轮询只是兜底（防漏报），
+    // 因此频率放低到 5 分钟，避免长期运行时持续的全量 AT+CMGL=4 流量。
+    private readonly DispatcherTimer _smsPollTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private readonly SmsForwarder _smsForwarder = new();
     private readonly CancellationTokenSource _forwardingCts = new();
     private readonly CancellationTokenSource _lifetimeCts = new();
@@ -239,7 +241,9 @@ public sealed class MainWindow : Window
                 FlushConnectLog();
                 var failure = await DescribeConnectionFailureAsync(null);
                 _statusHint.Text = failure;
-                var diagnostics = PlatformServices.GetDiagnostics();
+                // Platform diagnostics can enumerate serial/PnP devices. Keep that synchronous
+                // adapter API off the UI thread, including the connection-failure path.
+                var diagnostics = await Task.Run(PlatformServices.GetDiagnostics, _lifetimeCts.Token);
                 var details = string.Equals(failure, diagnostics, StringComparison.Ordinal)
                     ? failure
                     : $"{failure}\n\n{diagnostics}";
@@ -301,11 +305,18 @@ public sealed class MainWindow : Window
 
     private void FlushConnectLog() { try { Directory.CreateDirectory(Path.GetDirectoryName(ConnectLogPath)!); lock (_connectLog) File.WriteAllText(ConnectLogPath, _connectLog.ToString()); } catch { } }
     private void OnSettingsChanged(object? sender, EventArgs e) => Dispatcher.UIThread.Post(() =>
-    { if (!_closing) _refreshTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(AppSettings.Current.RefreshIntervalSeconds, 1, 3600)); });
+    {
+        if (_closing) return;
+        _refreshTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(AppSettings.Current.RefreshIntervalSeconds, 1, 3600));
+        UpdateSmsForwardingSubscription(Modem.IsConnected);
+    });
 
     private void UpdateSmsForwardingSubscription(bool connected)
     {
-        var service = connected ? Modem.Sms : null;
+        // 默认关闭：仅当用户显式启用转发且配置了至少一个 webhook 时才订阅，
+        // 避免把含验证码的短信在用户不知情时外发。
+        var enabled = AppSettings.Current.SmsForwardingEnabled && AppSettings.Current.HasForwardingTarget;
+        var service = connected && enabled ? Modem.Sms : null;
         if (ReferenceEquals(service, _forwardingService)) return;
         if (_forwardingService is not null) _forwardingService.MessageReceived -= OnSmsReceived;
         _forwardingService = service;

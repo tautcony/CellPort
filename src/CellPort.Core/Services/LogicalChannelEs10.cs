@@ -28,7 +28,17 @@ namespace CellPort.Core.Services;
 /// </summary>
 public sealed class LogicalChannelEs10(AtEngine engine, HttpClient? notificationHttpClient = null)
 {
-    private static readonly HttpClient NotificationHttpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // 禁止自动重定向：通知地址来自卡片，重定向可能把请求带去内网目标。
+    private static readonly HttpClient NotificationHttpClient = new(
+        new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            UseProxy = false,
+            ConnectCallback = NotificationEndpointPolicy.ConnectPublicEndpointAsync,
+        })
+    {
+        Timeout = TimeSpan.FromSeconds(30),
+    };
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
     private readonly HttpClient _notificationHttpClient = notificationHttpClient ?? NotificationHttpClient;
 
@@ -438,6 +448,14 @@ public sealed class LogicalChannelEs10(AtEngine engine, HttpClient? notification
         var baseUri = new UriBuilder(
             Uri.UriSchemeHttps, absolute.Host, absolute.IsDefaultPort ? -1 : absolute.Port).Uri;
         var endpoint = new Uri(baseUri, "/gsma/rsp2/es9plus/handleNotification");
+
+        // 地址来自卡片（外部数据），必须做白名单校验，避免 SSRF 到内网/云元数据。
+        var policyError = await NotificationEndpointPolicy.ValidateAsync(endpoint, ct).ConfigureAwait(false);
+        if (policyError is not null)
+        {
+            return policyError;
+        }
+
         var payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
             pendingNotification = Convert.ToBase64String(EncodeNode(pending)),

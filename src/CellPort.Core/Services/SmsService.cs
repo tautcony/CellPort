@@ -51,7 +51,7 @@ public sealed class SmsService(AtEngine engine)
     {
         // 0 = 未读，1 = 已读，2/3 = 未发/已发，4 = 全部
         var result = await SafeAsync("AT+CMGL=4", ct, AtEngine.LongTimeout).ConfigureAwait(false);
-        if (result is null)
+        if (result is not { Succeeded: true })
         {
             return 0;
         }
@@ -171,7 +171,7 @@ public sealed class SmsService(AtEngine engine)
     private async Task ReadByIndexAsync(int index)
     {
         var r = await SafeAsync($"AT+CMGR={index}", null, AtEngine.DefaultTimeout).ConfigureAwait(false);
-        if (r is null)
+        if (r is not { Succeeded: true })
         {
             return;
         }
@@ -197,7 +197,7 @@ public sealed class SmsService(AtEngine engine)
     }
 
     /// <summary>
-    /// 发送短信。自动选择 UCS2 或 GSM 7-bit 编码。
+    /// 发送短信。自动选择 UCS2 或 GSM 7-bit 编码，超长正文按 UDH 分段发送。
     /// </summary>
     /// <param name="number">目标号码，可带 + 前缀。</param>
     /// <param name="body">正文。</param>
@@ -209,70 +209,63 @@ public sealed class SmsService(AtEngine engine)
             return false;
         }
 
-        var normalized = NormalizeNumber(number);
-        var (hex, dcs) = SmsCodec.EncodeForText(body);
+        string normalized;
+        IReadOnlyList<string> pdus;
+        try
+        {
+            normalized = SmsCodec.NormalizePhoneNumber(number);
+            pdus = SmsCodec.BuildSubmitPdus(normalized, body);
+        }
+        catch (ArgumentException ex)
+        {
+            AppLog.Warn($"短信 PDU 构造失败：{ex.Message}");
+            return false;
+        }
 
-        // 构造 SMS-SUBMIT PDU（SMSC 长度置 0，使用模块默认短信中心）。
-        var pdu = BuildPdu(normalized, dcs, hex, hex.Length / 2);
-
-        // TPDU 长度 = PDU 总字节数 - 1（SMSC 长度字节）
-        var tpduLength = (pdu.Length / 2) - 1;
+        if (pdus.Count == 0 || pdus.Count > 255)
+        {
+            AppLog.Warn($"短信分段数超出上限：{pdus.Count}");
+            return false;
+        }
 
         // 切到 PDU 模式发送
         await SafeAsync("AT+CMGF=0", ct).ConfigureAwait(false);
 
-        await SafeAsync($"AT+CMGS={tpduLength}", ct, AtEngine.DefaultTimeout).ConfigureAwait(false);
-
-        // CMGS 执行后会返回 ">" 提示符，随后写入 PDU 并以 Ctrl+Z 结束。
-        var sendResult = await SafeAsync($"{pdu}\u001A", ct, AtEngine.LongTimeout).ConfigureAwait(false);
-        var ok = sendResult?.Succeeded == true;
-
-        if (ok)
+        for (var i = 0; i < pdus.Count; i++)
         {
-            var msg = new SmsMessage
+            var pdu = pdus[i];
+            // TPDU 长度 = PDU 总字节数 - 1（SMSC 长度字节）
+            var tpduLength = (pdu.Length / 2) - 1;
+
+            // 提示符、PDU 和最终响应保持在同一个 AT 租约里，避免取消或并发命令
+            // 把模块留在等待短信正文的模式。
+            var sendResult = await SafeAsync(
+                $"AT+CMGS={tpduLength}", ct, AtEngine.LongTimeout,
+                expectPrompt: ">", promptPayload: $"{pdu}\u001A").ConfigureAwait(false);
+            if (sendResult?.Succeeded != true)
             {
-                Number = normalized,
-                Body = body,
-                Direction = SmsDirection.Outgoing,
-                Status = SmsStatus.Sent,
-                Timestamp = DateTime.Now,
-                VerificationCode = SmsPduParser.ExtractVerificationCode(body),
-            };
-            lock (_lock)
-            {
-                _inbox.Add(msg);
+                AppLog.Warn($"短信第 {i + 1}/{pdus.Count} 段发送失败或 CMGS 被拒：{sendResult?.Completion}。");
+                return false;
             }
-            InboxChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        return ok;
+        var msg = new SmsMessage
+        {
+            Number = normalized,
+            Body = body,
+            Direction = SmsDirection.Outgoing,
+            Status = SmsStatus.Sent,
+            Timestamp = DateTime.Now,
+            VerificationCode = SmsPduParser.ExtractVerificationCode(body),
+        };
+        lock (_lock)
+        {
+            _inbox.Add(msg);
+        }
+        InboxChanged?.Invoke(this, EventArgs.Empty);
+
+        return true;
     }
-
-    /// <summary>
-    /// 构造完整的 SMS-SUBMIT PDU（SMSC 长度置 0，使用模块默认短信中心）。
-    /// </summary>
-    private static string BuildPdu(string number, string dcs, string userDataHex, int udOctets)
-    {
-        var international = number.StartsWith('+');
-        var digits = number.TrimStart('+');
-        var addrBcd = SmsCodec.EncodeNumberBcd(digits, international);
-        var addrLen = digits.Length; // 十进制位数（不含国际前缀）
-        var toa = international ? "91" : "81";
-
-        return "00"                                  // SMSC 信息长度 = 0
-             + "11"                                  // SMS-SUBMIT + UDHI 关闭 + 请求状态报告关闭
-             + $"{addrLen:X2}"                       // 目标地址位数
-             + toa                                   // 号码类型
-             + addrBcd                               // BCD 号码
-             + "00"                                  // PID
-             + dcs                                   // DCS
-             + "00"                                  // 相对有效期
-             + $"{udOctets:X2}"                      // UD 长度
-             + userDataHex;                          // UD
-    }
-
-    private static string NormalizeNumber(string number) =>
-        new([.. number.Where(c => char.IsDigit(c) || c == '+')]);
 
     private static bool IsHex(string s) =>
         s.Length >= 10 && s.Length % 2 == 0 && s.All(Uri.IsHexDigit);
@@ -376,17 +369,36 @@ public sealed class SmsService(AtEngine engine)
                left.Timestamp.HasValue && left.Timestamp == right.Timestamp;
     }
 
-    private async Task<AtResult?> SafeAsync(string cmd, CancellationToken? ct, TimeSpan? timeout = null)
+    private async Task<AtResult?> SafeAsync(
+        string cmd, CancellationToken? ct, TimeSpan? timeout = null, string? expectPrompt = null,
+        string? promptPayload = null)
     {
+        var token = ct ?? CancellationToken.None;
         try
         {
-            var r = await engine.ExecuteAsync(cmd, timeout, ct ?? CancellationToken.None)
-                .ConfigureAwait(false);
-            return r.Succeeded ? r : null;
+            var r = expectPrompt is not null && promptPayload is not null
+                ? await engine.ExecutePromptExchangeAsync(
+                    cmd, promptPayload, AtEngine.DefaultTimeout, timeout ?? AtEngine.DefaultTimeout,
+                    token, expectPrompt).ConfigureAwait(false)
+                : await engine.ExecuteAsync(cmd, timeout, token, expectPrompt).ConfigureAwait(false);
+            // 保留完成状态：区分「模块拒绝(ERROR)」与「无响应(Timeout)」是排障的关键。
+            if (!r.Succeeded)
+            {
+                AppLog.Warn($"AT 指令失败：{Truncate(cmd)} → {r.Completion}");
+            }
+            return r;
         }
-        catch
+        catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"AT 指令异常：{Truncate(cmd)} → {ex.GetType().Name} {ex.Message}");
             return null;
         }
     }
+
+    private static string Truncate(string value) =>
+        value.Length <= 60 ? value : value[..60] + "…";
 }

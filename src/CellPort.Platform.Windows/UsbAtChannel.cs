@@ -35,103 +35,139 @@ public sealed class UsbAtChannel : IAtChannel
     {
         return Task.Run<UsbAtChannel?>(() =>
         {
-            // 由于完整 WinUSB 绑定需要设备路径枚举，这里先做可行性判断：
-            // 若 MI_02 已绑定 WinUSB，设备路径形如 \\?\usb#vid_2ca3&pid_4006&mi_02#...
-            var path = FindAtInterfacePath();
-            if (path is null)
+            // 候选接口按 MI_02（首选 AT）→ MI_03（备用）排序；
+            // 逐个尝试并能校验接口类型，避免连到诊断/音频口。
+            foreach (var path in FindAtInterfacePaths())
             {
-                return null;
-            }
-
-            var handle = CreateFile(
-                path,
-                GenericRead | GenericWrite,
-                FileShareRead | FileShareWrite,
-                nint.Zero,
-                OpenExisting,
-                0,
-                nint.Zero);
-
-            if (handle == InvalidHandleValue)
-            {
-                return null;
-            }
-
-            if (!WinUsb_Initialize(handle, out var winUsb))
-            {
-                CloseHandle(handle);
-                return null;
-            }
-
-            try
-            {
-                if (!WinUsb_QueryInterfaceSettings(winUsb, 0, out var ifDesc))
+                ct.ThrowIfCancellationRequested();
+                var opened = TryOpenInterface(path);
+                if (opened is not null)
                 {
-                    WinUsb_Free(winUsb);
-                    CloseHandle(handle);
-                    return null;
+                    return opened;
                 }
-
-                byte bulkIn = 0, bulkOut = 0;
-                for (byte i = 0; i < ifDesc.bNumEndpoints; i++)
-                {
-                    if (!WinUsb_QueryPipe(winUsb, 0, i, out var pipe))
-                    {
-                        continue;
-                    }
-
-                    // PipeType: 2 = Bulk
-                    if (pipe.PipeType != 2)
-                    {
-                        continue;
-                    }
-
-                    // WinUSB 的 PipeId 即端点地址；0x80 位表示方向为 IN（设备 → 主机）
-                    if ((pipe.PipeId & 0x80) != 0)
-                    {
-                        bulkIn = pipe.PipeId;
-                    }
-                    else
-                    {
-                        bulkOut = pipe.PipeId;
-                    }
-                }
-
-                if (bulkIn == 0 || bulkOut == 0)
-                {
-                    WinUsb_Free(winUsb);
-                    CloseHandle(handle);
-                    return null;
-                }
-
-                return new UsbAtChannel
-                {
-                    _deviceHandle = handle,
-                    _winUsbHandle = winUsb,
-                    _bulkInPipe = bulkIn,
-                    _bulkOutPipe = bulkOut,
-                    Description = $"USB 直控 (MI_02, in=0x{bulkIn:X2} out=0x{bulkOut:X2})",
-                };
             }
-            catch
-            {
-                WinUsb_Free(winUsb);
-                CloseHandle(handle);
-                return null;
-            }
+
+            return null;
         }, ct);
     }
 
     /// <summary>
-    /// 在设备接口列表中查找 AT 通道的设备路径。
+    /// 打开单个设备接口，校验其为 vendor-specific（0xFF/0xFF）且具备一对 Bulk 端点。
     /// </summary>
-    private static string? FindAtInterfacePath()
+    private static UsbAtChannel? TryOpenInterface(string path)
+    {
+        var handle = CreateFile(
+            path,
+            GenericRead | GenericWrite,
+            FileShareRead | FileShareWrite,
+            nint.Zero,
+            OpenExisting,
+            0,
+            nint.Zero);
+
+        if (handle == InvalidHandleValue)
+        {
+            return null;
+        }
+
+        if (!WinUsb_Initialize(handle, out var winUsb))
+        {
+            CloseHandle(handle);
+            return null;
+        }
+
+        var attached = false;
+        try
+        {
+            if (!WinUsb_QueryInterfaceSettings(winUsb, 0, out var ifDesc))
+            {
+                return null;
+            }
+
+            // 只接受厂商自定义接口：部分固件把 MI_02 用作 AT、MI_03 用作 modem/诊断，
+            // 仅凭接口号无法区分，必须同时校验 bInterfaceClass/SubClass。
+            if (ifDesc.bInterfaceClass != InterfaceClassVendorSpecific ||
+                ifDesc.bInterfaceSubClass != InterfaceSubClassVendorSpecific)
+            {
+                return null;
+            }
+
+            byte bulkIn = 0, bulkOut = 0;
+            for (byte i = 0; i < ifDesc.bNumEndpoints; i++)
+            {
+                if (!WinUsb_QueryPipe(winUsb, 0, i, out var pipe))
+                {
+                    continue;
+                }
+
+                // PipeType: 2 = Bulk
+                if (pipe.PipeType != 2)
+                {
+                    continue;
+                }
+
+                // WinUSB 的 PipeId 即端点地址；0x80 位表示方向为 IN（设备 → 主机）
+                if ((pipe.PipeId & 0x80) != 0)
+                {
+                    bulkIn = pipe.PipeId;
+                }
+                else
+                {
+                    bulkOut = pipe.PipeId;
+                }
+            }
+
+            if (bulkIn == 0 || bulkOut == 0)
+            {
+                return null;
+            }
+
+            var channel = new UsbAtChannel
+            {
+                _deviceHandle = handle,
+                _winUsbHandle = winUsb,
+                _bulkInPipe = bulkIn,
+                _bulkOutPipe = bulkOut,
+                Description = $"USB 直控 ({InterfaceLabel(path)}, in=0x{bulkIn:X2} out=0x{bulkOut:X2})",
+            };
+            attached = true;
+            return channel;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (!attached)
+            {
+                WinUsb_Free(winUsb);
+                CloseHandle(handle);
+            }
+        }
+    }
+
+    private static string InterfaceLabel(string path)
+    {
+        var lower = path.ToLowerInvariant();
+        if (lower.Contains("mi_02")) return "MI_02";
+        if (lower.Contains("mi_03")) return "MI_03";
+        return "AT";
+    }
+
+    /// <summary>
+    /// 枚举所有可能是 AT 接口的设备路径，按 MI_02 → MI_03 的优先级排序。
+    /// </summary>
+    private static IReadOnlyList<string> FindAtInterfacePaths()
     {
         var guids = new[]
         {
             new Guid("A5DCBF10-6530-11D2-901F-00C04FB951ED"), // GUID_DEVINTERFACE_USB_DEVICE
             new Guid("DEE824EF-729B-4A0E-9C14-B7117D33A817"), // GUID_DEVINTERFACE_WINUSB
         };
+
+        var paths = new List<(int Priority, int Order, string Path)>();
+        var order = 0;
 
         foreach (var guid0 in guids)
         {
@@ -170,7 +206,7 @@ public sealed class UsbAtChannel : IAtChannel
                             var path = Marshal.PtrToStringUni(buffer + (nint.Size == 8 ? 8 : 4));
                             if (!string.IsNullOrEmpty(path) && IsTargetAtInterface(path))
                             {
-                                return path;
+                                paths.Add((InterfacePriority(path), order++, path));
                             }
                         }
                     }
@@ -186,7 +222,19 @@ public sealed class UsbAtChannel : IAtChannel
             }
         }
 
-        return null;
+        return [.. paths
+            .OrderBy(item => item.Priority)
+            .ThenBy(item => item.Order)
+            .Select(item => item.Path)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static int InterfacePriority(string path)
+    {
+        var lower = path.ToLowerInvariant();
+        if (lower.Contains("mi_02")) return 0;
+        if (lower.Contains("mi_03")) return 1;
+        return 2;
     }
 
     /// <summary>
@@ -244,12 +292,20 @@ public sealed class UsbAtChannel : IAtChannel
         try
         {
             var buffer = data.ToArray();
-            var ok = WinUsb_WritePipe(_winUsbHandle, _bulkOutPipe, buffer,
-                (uint)buffer.Length, out var written, nint.Zero);
+            var handle = _winUsbHandle;
+            var pipe = _bulkOutPipe;
+
+            // WinUsb_WritePipe 是同步阻塞调用：放到线程池，避免阻塞调用线程（可能是 UI 线程）。
+            var (ok, written, error) = await Task.Run(() =>
+            {
+                var result = WinUsb_WritePipe(handle, pipe, buffer,
+                    (uint)buffer.Length, out var transferred, nint.Zero);
+                return (result, transferred, Marshal.GetLastWin32Error());
+            }, ct).ConfigureAwait(false);
 
             if (!ok || written != buffer.Length)
             {
-                throw new IOException($"USB 写入失败（期望 {buffer.Length}，实际 {written}）。");
+                throw new IOException($"USB 写入失败（期望 {buffer.Length}，实际 {written}，Win32 错误码 {error}）。");
             }
         }
         finally
@@ -268,21 +324,29 @@ public sealed class UsbAtChannel : IAtChannel
         await _ioLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // WinUSB 同步读取：设置超时后调用。
+            // WinUSB 同步读取：设置超时后调用。整段放到线程池执行，
+            // 否则最长 500ms 的阻塞会落在调用线程上（第一条 AT 指令常在 UI 线程发起）。
             var timeoutMs = (uint)Math.Clamp(timeout.TotalMilliseconds, 1, 60000);
-            WinUsb_SetPipePolicy(_winUsbHandle, _bulkInPipe, PipeTransferTimeout, sizeof(uint), ref timeoutMs);
-
+            var handle = _winUsbHandle;
+            var pipe = _bulkInPipe;
             var managed = new byte[buffer.Length];
-            if (!WinUsb_ReadPipe(_winUsbHandle, _bulkInPipe, managed,
-                    (uint)managed.Length, out var read, nint.Zero))
+
+            var (ok, read, error) = await Task.Run(() =>
             {
-                var err = Marshal.GetLastWin32Error();
+                WinUsb_SetPipePolicy(handle, pipe, PipeTransferTimeout, sizeof(uint), ref timeoutMs);
+                var result = WinUsb_ReadPipe(handle, pipe, managed,
+                    (uint)managed.Length, out var transferred, nint.Zero);
+                return (result, transferred, Marshal.GetLastWin32Error());
+            }, ct).ConfigureAwait(false);
+
+            if (!ok)
+            {
                 // 超时（ERROR_SEM_TIMEOUT 121）视为本次无数据。
-                if (err == 121)
+                if (error == 121)
                 {
                     return 0;
                 }
-                throw new IOException($"USB 读取失败，Win32 错误码 {err}。");
+                throw new IOException($"USB 读取失败，Win32 错误码 {error}。");
             }
 
             var count = (int)read;
@@ -314,6 +378,8 @@ public sealed class UsbAtChannel : IAtChannel
     private const uint DigcfPresent = 0x00000002;
     private const uint DigcfDeviceInterface = 0x00000010;
     private const uint PipeTransferTimeout = 0x01;
+    private const byte InterfaceClassVendorSpecific = 0xFF;
+    private const byte InterfaceSubClassVendorSpecific = 0xFF;
     private static readonly nint InvalidHandleValue = new(-1);
 
     [StructLayout(LayoutKind.Sequential)]

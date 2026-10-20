@@ -32,6 +32,25 @@ public sealed class SmsPduParserTests
         Assert.Equal(SmsDirection.Outgoing, message.Direction);
     }
 
+    [Theory]
+    // 0x23 = 32 个 15 分钟 = UTC+8；0x0A = 符号位 + 20 个 15 分钟 = UTC-5。
+    // TP-SCTS 采用半字节交换的 BCD：2024-01-10 12:00:00 → 42 10 01 21 00 00。
+    [InlineData("42100121000023", 480)]
+    [InlineData("4210012100000A", -300)]
+    [InlineData("42100121000000", 0)]
+    public void ParsesServiceCentreTimestampWithSignedTimezone(string timestamp, int offsetMinutes)
+    {
+        var message = SmsPduParser.Parse(BuildDeliverPdu("+19545742336", "Test", timestamp));
+
+        Assert.NotNull(message);
+        Assert.NotNull(message.Timestamp);
+
+        // TP-SCTS 是「本地时间 + 时区」，换算回 UTC 应与时区符号无关地一致。
+        var expectedUtc = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc)
+            .AddMinutes(-offsetMinutes);
+        Assert.Equal(expectedUtc, message.Timestamp.Value.ToUniversalTime());
+    }
+
     [Fact]
     public async Task RepeatedStoredSyncDoesNotAppendTheSameSimSlotAgain()
     {

@@ -13,6 +13,7 @@ public sealed class SettingsPage : UserControl, IModuleAware, IDisposable, IAsyn
     private readonly CheckBox _privacy = new() { Name = "PrivacyBox", Content = "隐私模式（隐藏敏感信息）" };
     private readonly CheckBox _autoConnect = new() { Name = "AutoConnectBox", Content = "启动时自动连接" };
     private readonly TextBox _refresh = new() { Name = "RefreshIntervalBox", Width = 220 };
+    private readonly CheckBox _forwarding = new() { Name = "SmsForwardingBox", Content = "启用短信转发（默认关闭）" };
     private readonly TextBox _bark = new() { Name = "BarkBox", PlaceholderText = "Bark Webhook URL" };
     private readonly TextBox _feishu = new() { Name = "FeishuBox", PlaceholderText = "飞书 Webhook URL" };
     private readonly TextBox _dingtalk = new() { Name = "DingTalkBox", PlaceholderText = "钉钉 Webhook URL" };
@@ -30,6 +31,14 @@ public sealed class SettingsPage : UserControl, IModuleAware, IDisposable, IAsyn
         panel.Children.Add(Label("主题", _theme)); panel.Children.Add(_privacy); panel.Children.Add(_autoConnect);
         panel.Children.Add(Label("状态刷新间隔（秒，1–3600）", _refresh));
         panel.Children.Add(new TextBlock { Text = "短信转发", FontSize = 15, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(0, 8, 0, 0) });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "开启后收到的每条短信（含验证码等敏感内容）都会发送到下方 webhook，请确认信任目标服务后再启用。",
+            FontSize = 12,
+            Opacity = .75,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        });
+        panel.Children.Add(_forwarding);
         panel.Children.Add(_bark); panel.Children.Add(_feishu); panel.Children.Add(_dingtalk);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         var save = new Button { Content = "保存设置" }; save.Click += async (_, _) => await SaveAsync();
@@ -48,12 +57,14 @@ public sealed class SettingsPage : UserControl, IModuleAware, IDisposable, IAsyn
     {
         _loading = true; var s = AppSettings.Current;
         _theme.SelectedIndex = Math.Clamp(s.ThemeIndex, 0, 2); _privacy.IsChecked = s.PrivacyMode; _autoConnect.IsChecked = s.AutoConnect;
+        _forwarding.IsChecked = s.SmsForwardingEnabled;
         _refresh.Text = s.RefreshIntervalSeconds.ToString(); _bark.Text = s.BarkUrl ?? ""; _feishu.Text = s.FeishuWebhook ?? ""; _dingtalk.Text = s.DingTalkWebhook ?? "";
         _loading = false;
     }
     private async Task SaveAsync()
     {
         var s = AppSettings.Current; s.AutoConnect = _autoConnect.IsChecked == true;
+        s.SmsForwardingEnabled = _forwarding.IsChecked == true;
         s.BarkUrl = EmptyToNull(_bark.Text); s.FeishuWebhook = EmptyToNull(_feishu.Text); s.DingTalkWebhook = EmptyToNull(_dingtalk.Text);
         if (int.TryParse(_refresh.Text, out var seconds) && seconds is >= 1 and <= 3600) s.RefreshIntervalSeconds = seconds;
         else _refresh.Text = s.RefreshIntervalSeconds.ToString();
@@ -91,6 +102,7 @@ public sealed class SettingsPage : UserControl, IModuleAware, IDisposable, IAsyn
 /// <summary>Persisted settings retain the original settings.json fields and defaults.</summary>
 public sealed class AppSettings
 {
+    private static readonly Lock SaveGate = new();
     private static AppSettings? _current;
     internal static string? ConfigPathOverride { get; set; }
     public static event EventHandler? SettingsChanged;
@@ -99,9 +111,23 @@ public sealed class AppSettings
     public bool PrivacyMode { get; set; }
     public bool AutoConnect { get; set; } = true;
     public int RefreshIntervalSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// 是否启用短信转发。默认关闭：短信常含验证码等敏感信息，
+    /// 外发必须是用户的显式选择。
+    /// </summary>
+    public bool SmsForwardingEnabled { get; set; }
+
     public string? BarkUrl { get; set; }
     public string? FeishuWebhook { get; set; }
     public string? DingTalkWebhook { get; set; }
+
+    /// <summary>是否至少配置了一个转发目标。</summary>
+    public bool HasForwardingTarget =>
+        !string.IsNullOrWhiteSpace(BarkUrl) ||
+        !string.IsNullOrWhiteSpace(FeishuWebhook) ||
+        !string.IsNullOrWhiteSpace(DingTalkWebhook);
+
     public string? LastGoodSerialPort { get; set; }
     public DateTime? LastConnectedAt { get; set; }
     internal static string ConfigPath => ConfigPathOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CellPort", "settings.json");
@@ -136,13 +162,74 @@ public sealed class AppSettings
     public void Save() => SaveToPath(ConfigPath);
     internal bool SaveToPath(string path)
     {
+        lock (SaveGate)
+        {
+            return SaveToPathLocked(path);
+        }
+    }
+
+    private bool SaveToPathLocked(string path)
+    {
+        string? temp = null;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+
+            // 先写临时文件再原子替换：直接覆盖时若掉电/崩溃会留下截断的 JSON，
+            // 下次启动会静默回落到默认值，用户配置全部丢失。
+            temp = path + ".tmp";
+            File.WriteAllText(temp, json);
+            RestrictPermissions(temp);
+
+            if (File.Exists(path))
+            {
+                try
+                {
+                    File.Replace(temp, path, destinationBackupFileName: null);
+                }
+                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
+                {
+                    // 某些文件系统（容器卷/网络盘）不支持 File.Replace，退化为覆盖移动。
+                    File.Move(temp, path, overwrite: true);
+                }
+            }
+            else
+            {
+                File.Move(temp, path);
+            }
+
             try { SettingsChanged?.Invoke(this, EventArgs.Empty); } catch (Exception ex) { AppLog.Warn($"通知设置变更失败：{ex.Message}"); }
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { AppLog.Warn($"保存设置失败：{ex.Message}"); return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                      or PlatformNotSupportedException)
+        {
+            if (temp is not null)
+            {
+                try { File.Delete(temp); } catch { }
+            }
+            AppLog.Warn($"保存设置失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 收紧配置文件权限：webhook URL 通常内嵌 token，不应让同机其它用户读取。
+    /// Windows 上由 %APPDATA% 的 ACL 提供同等保护。
+    /// </summary>
+    private static void RestrictPermissions(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 }

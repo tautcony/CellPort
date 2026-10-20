@@ -58,14 +58,23 @@ public sealed class SerialAtChannel : IAtChannel
 
         if (completed != openTask)
         {
-            // 超时或被取消：放弃该端口。后台线程可能仍在阻塞，
-            // 因此不做 Dispose，避免在其运行时释放句柄导致未定义行为；
-            // 交由 GC 与 OS 在底层调用返回后回收。
+            // 超时或被取消：后台线程仍可能在稍后完成并永久持有句柄，
+            // 因此不论 Open 成功还是失败，都在任务结束时关闭并释放端口对象。
+            DisposeWhenOpened(openTask, port);
+            ct.ThrowIfCancellationRequested();
             throw new TimeoutException($"打开串口 {_portName} 超时。");
         }
 
         // 让异常向上冒泡（端口被占用 / 不存在 / 访问被拒等）。
-        port = await openTask.ConfigureAwait(false);
+        try
+        {
+            port = await openTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            port.Dispose();
+            throw;
+        }
 
         try
         {
@@ -83,6 +92,38 @@ public sealed class SerialAtChannel : IAtChannel
 
     /// <summary>打开端口的超时上限。超过即认为该端口不可用。</summary>
     public static readonly TimeSpan OpenTimeout = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// 在后台打开任务超时后调用：无论任务之后成功还是失败，都关闭并释放端口对象。
+    /// </summary>
+    private static void DisposeWhenOpened(Task<SerialPort> openTask, SerialPort port)
+    {
+        _ = openTask.ContinueWith(t =>
+        {
+            if (t.IsFaulted) _ = t.Exception; // 观察未观测任务异常
+
+            try
+            {
+                if (port.IsOpen)
+                {
+                    port.Close();
+                }
+            }
+            catch
+            {
+                // 关闭失败也不能把异常抛到线程池
+            }
+
+            try
+            {
+                port.Dispose();
+            }
+            catch
+            {
+                // 同上
+            }
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
 
     public Task CloseAsync()
     {
@@ -237,12 +278,44 @@ public sealed class SerialAtChannel : IAtChannel
             return [];
         }
 
-        return [.. names
+        return BuildCandidates(names);
+    }
+
+    /// <summary>
+    /// 异步枚举候选串口。调用链起点在界面线程时应使用本重载，
+    /// 避免 <see cref="EnumerateCandidates"/> 内部的同步等待拖住 UI。
+    /// </summary>
+    public static async Task<IReadOnlyList<SerialPortCandidate>> EnumerateCandidatesAsync(
+        TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(3);
+        try
+        {
+            var names = await Task.Run(SerialPort.GetPortNames, ct)
+                .WaitAsync(effectiveTimeout, ct).ConfigureAwait(false);
+            return BuildCandidates(names);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TimeoutException)
+        {
+            // 超时：本次枚举不可用
+            return [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<SerialPortCandidate> BuildCandidates(IEnumerable<string> names) =>
+        [.. names
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(NaturalSort)
             .Select(n => new SerialPortCandidate(n, null))];
-    }
 
     /// <summary>
     /// 尝试打开端口并在失败时快速返回，用于在真正连接前筛掉不可用端口。

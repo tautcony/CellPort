@@ -23,13 +23,13 @@ public sealed class PhonebookService(AtEngine engine)
     /// <summary>读取电话簿容量。SIM 不支持时返回 null。</summary>
     public async Task<StorageInfo?> GetStorageInfoAsync(CancellationToken ct = default)
     {
-        if (await ExecAsync("AT+CPBS=\"SM\"", ct).ConfigureAwait(false) is null)
+        if (await ExecAsync("AT+CPBS=\"SM\"", ct).ConfigureAwait(false) is not { Succeeded: true })
         {
             return null;
         }
 
         var q = await ExecAsync("AT+CPBR=?", ct).ConfigureAwait(false);
-        if (q is null)
+        if (q is not { Succeeded: true })
         {
             return null;
         }
@@ -48,19 +48,21 @@ public sealed class PhonebookService(AtEngine engine)
     {
         var list = new List<PhonebookEntry>();
 
-        if (await ExecAsync("AT+CPBS=\"SM\"", ct).ConfigureAwait(false) is null)
+        if (await ExecAsync("AT+CPBS=\"SM\"", ct).ConfigureAwait(false) is not { Succeeded: true })
         {
             return list;
         }
 
         var cap = await ExecAsync("AT+CPBR=?", ct).ConfigureAwait(false);
-        var m = Regex.Match(cap?.RawText ?? string.Empty, @"\+CPBR:\s*\(\s*1\s*-\s*(\d+)\s*\)");
+        var m = Regex.Match(cap is { Succeeded: true } ? cap.RawText : string.Empty, @"\+CPBR:\s*\(\s*1\s*-\s*(\d+)\s*\)");
         var max = m.Success ? int.Parse(m.Groups[1].Value) : 250;
 
         // 记住原字符集 → 切 UCS2（中文联系人名可读）→ 读完恢复
         var saved = "GSM";
         var csReply = await ExecAsync("AT+CSCS?", ct).ConfigureAwait(false);
-        var csLine = csReply?.LinesWithPrefix("+CSCS").FirstOrDefault();
+        var csLine = csReply is { Succeeded: true }
+            ? csReply.LinesWithPrefix("+CSCS").FirstOrDefault()
+            : null;
         if (csLine is not null)
         {
             var cm = Regex.Match(csLine, @"""([^""]+)""");
@@ -76,7 +78,7 @@ public sealed class PhonebookService(AtEngine engine)
 
             var r = await ExecAsync($"AT+CPBR=1,{max}", ct, AtEngine.LongTimeout)
                 .ConfigureAwait(false);
-            if (r is not null)
+            if (r is { Succeeded: true })
             {
                 foreach (var line in r.LinesWithPrefix("+CPBR"))
                 {
@@ -90,7 +92,9 @@ public sealed class PhonebookService(AtEngine engine)
         }
         finally
         {
-            await ExecAsync($@"AT+CSCS=""{saved}""", ct).ConfigureAwait(false);
+            // 恢复字符集必须与调用方的取消状态无关：否则用户取消读电话簿后，
+            // 模块会停留在 UCS2 字符集，影响后续文本类命令。
+            await ExecAsync($@"AT+CSCS=""{saved}""", CancellationToken.None).ConfigureAwait(false);
         }
 
         return list.OrderBy(e => e.Index).ToList();
@@ -136,10 +140,19 @@ public sealed class PhonebookService(AtEngine engine)
         try
         {
             var r = await engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
-            return r.Succeeded ? r : null;
+            if (!r.Succeeded)
+            {
+                AppLog.Warn($"电话簿指令失败：{cmd} → {r.Completion}");
+            }
+            return r;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"电话簿指令异常：{cmd} → {ex.GetType().Name} {ex.Message}");
             return null;
         }
     }

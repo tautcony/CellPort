@@ -22,28 +22,28 @@ public sealed class DeviceInfoService(AtEngine engine)
 
         // 型号
         var cgmm = await TryAsync("AT+CGMM", ct).ConfigureAwait(false);
-        if (cgmm is not null)
+        if (cgmm is { Succeeded: true })
         {
             status.Model = cgmm.FirstLine ?? status.Model;
         }
 
         // 固件版本
         var cgmr = await TryAsync("AT+CGMR", ct).ConfigureAwait(false);
-        if (cgmr is not null)
+        if (cgmr is { Succeeded: true })
         {
             status.FirmwareRevision = cgmr.FirstLine;
         }
 
         // IMEI
         var cgsn = await TryAsync("AT+CGSN", ct).ConfigureAwait(false);
-        if (cgsn is not null)
+        if (cgsn is { Succeeded: true })
         {
             status.Imei = cgsn.FirstLine;
         }
 
         // SIM 状态
         var cpin = await TryAsync("AT+CPIN?", ct).ConfigureAwait(false);
-        if (cpin is not null)
+        if (cpin is { Succeeded: true })
         {
             status.SimReady = cpin.RawText.Contains("READY", StringComparison.OrdinalIgnoreCase);
         }
@@ -51,24 +51,24 @@ public sealed class DeviceInfoService(AtEngine engine)
         if (status.SimReady)
         {
             var iccid = await TryAsync("AT+QCCID", ct).ConfigureAwait(false);
-            if (iccid is not null)
+            if (iccid is { Succeeded: true })
             {
                 status.Iccid = ExtractAfterColon(iccid.FirstLine);
             }
 
             var imsi = await TryAsync("AT+CIMI", ct).ConfigureAwait(false);
-            if (imsi is not null)
+            if (imsi is { Succeeded: true })
             {
                 status.Imsi = imsi.FirstLine;
             }
 
             var num = await TryAsync("AT+CNUM", ct).ConfigureAwait(false);
-            status.OwnNumber = ParseCnum(num);
+            status.OwnNumber = num is { Succeeded: true } ? ParseCnum(num) : null;
         }
 
         // 信号强度
         var csq = await TryAsync("AT+CSQ", ct).ConfigureAwait(false);
-        if (csq is not null)
+        if (csq is { Succeeded: true })
         {
             var m = Regex.Match(csq.RawText, @"\+CSQ:\s*(\d+)\s*,\s*(\d+)");
             if (m.Success && int.TryParse(m.Groups[1].Value, out var rssi))
@@ -79,7 +79,7 @@ public sealed class DeviceInfoService(AtEngine engine)
 
         // 运营商
         var cops = await TryAsync("AT+COPS?", ct).ConfigureAwait(false);
-        if (cops is not null)
+        if (cops is { Succeeded: true })
         {
             var m = Regex.Match(cops.RawText, "\"([^\"]+)\"");
             if (m.Success)
@@ -90,11 +90,11 @@ public sealed class DeviceInfoService(AtEngine engine)
 
         // 注册状态
         var creg = await TryAsync("AT+CREG?", ct).ConfigureAwait(false);
-        status.RegistrationStatus = ParseReg(creg);
+        status.RegistrationStatus = creg is { Succeeded: true } ? ParseReg(creg) : null;
 
         // 网络制式与附着（移远专有）
         var qnwinfo = await TryAsync("AT+QNWINFO", ct).ConfigureAwait(false);
-        if (qnwinfo is not null)
+        if (qnwinfo is { Succeeded: true })
         {
             var m = Regex.Match(qnwinfo.RawText, "\"([^\"]+)\"");
             if (m.Success)
@@ -104,7 +104,7 @@ public sealed class DeviceInfoService(AtEngine engine)
         }
 
         var cgatt = await TryAsync("AT+CGATT?", ct).ConfigureAwait(false);
-        if (cgatt is not null)
+        if (cgatt is { Succeeded: true })
         {
             var m = Regex.Match(cgatt.RawText, @"\+CGATT:\s*(\d)");
             if (m.Success)
@@ -121,8 +121,12 @@ public sealed class DeviceInfoService(AtEngine engine)
     public const string IsdrAid = "A0000005591010FFFFFFFF8900000100";
 
     /// <summary>
-    /// 探测成功后保留下来的逻辑通道客户端，供后续读取 Profile 等操作复用。
+    /// 探测成功后保留下来的逻辑通道「客户端」（无状态对象），供后续读取 Profile 等操作复用。
     /// 仅当探测结论为 Ready 时非空。
+    ///
+    /// 注意：探测结束时会关闭底层逻辑通道（Channel 归零），后续每次操作按需重新 CCHO。
+    /// 这是刻意的：切换 Profile 会触发 UICC refresh，跨操作保留通道号会拿到失效通道
+    /// （表现为 CGLA 返回 6A82/6D00），重新打开只多一次 CCHO/CCHC 往返，代价远低于排障成本。
     /// </summary>
     public LogicalChannelEs10? Es10 { get; private set; }
 
@@ -214,6 +218,8 @@ public sealed class DeviceInfoService(AtEngine engine)
                 }
                 finally
                 {
+                    // 成功/失败都关闭通道：客户端实例已保留在 Es10，通道号按需重开，
+                    // 避免跨操作持有可能因 UICC refresh 失效的逻辑通道（见 Es10 注释）。
                     await es10.CloseAsync().ConfigureAwait(false);
                 }
             }
@@ -241,7 +247,7 @@ public sealed class DeviceInfoService(AtEngine engine)
     {
         // 1) 通道基线：SELECT MF（7 字节，实测可用）
         var mf = await TryAsync("AT+CSIM=14,\"00A40000023F00\"", ct).ConfigureAwait(false);
-        if (mf is null || !mf.RawText.Contains("9000", StringComparison.OrdinalIgnoreCase))
+        if (mf is not { Succeeded: true } || !mf.RawText.Contains("9000", StringComparison.OrdinalIgnoreCase))
         {
             return EuiccCapability.ChannelUnavailable;
         }
@@ -251,8 +257,8 @@ public sealed class DeviceInfoService(AtEngine engine)
         var len8 = await TryAsync("AT+CSIM=16,\"00A40000023F0000\"", ct).ConfigureAwait(false);
         var len10 = await TryAsync("AT+CSIM=20,\"00A40000023F00000000\"", ct).ConfigureAwait(false);
 
-        var ack8 = len8 is not null && len8.Lines.Count > 0;
-        var ack10 = len10 is not null && len10.Lines.Count > 0;
+        var ack8 = len8 is { Succeeded: true } && len8.Lines.Count > 0;
+        var ack10 = len10 is { Succeeded: true } && len10.Lines.Count > 0;
 
         if (ack8 && !ack10)
         {
@@ -265,7 +271,7 @@ public sealed class DeviceInfoService(AtEngine engine)
         var sel = await TryAsync($"AT+CSIM={apdu.Length},\"{apdu}\"", ct, AtEngine.LongTimeout)
             .ConfigureAwait(false);
 
-        if (sel is not null && sel.RawText.Contains("9000", StringComparison.OrdinalIgnoreCase))
+        if (sel is { Succeeded: true } && sel.RawText.Contains("9000", StringComparison.OrdinalIgnoreCase))
         {
             return EuiccCapability.Ready;
         }
@@ -273,15 +279,33 @@ public sealed class DeviceInfoService(AtEngine engine)
         return EuiccCapability.IsdrNotFound;
     }
 
+    /// <summary>
+    /// 查询单条状态指令。AT 层失败仍返回原始结果，便于调用方按完成状态处理；
+    /// 传输异常才返回 null。日志区分「模块拒绝」与「无响应」。
+    /// </summary>
     private async Task<AtResult?> TryAsync(string cmd, CancellationToken ct, TimeSpan? timeout = null)
     {
         try
         {
             var r = await engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
-            return r.Succeeded ? r : null;
+            // ERROR 常见于「该固件不支持此指令」，降为 Info；超时/传输失败才是真问题。
+            if (!r.Succeeded && r.Completion is AtCompletionStatus.Error)
+            {
+                AppLog.Info($"状态查询不支持：{cmd} → {r.Completion}");
+            }
+            else if (!r.Succeeded)
+            {
+                AppLog.Warn($"状态查询失败：{cmd} → {r.Completion}");
+            }
+            return r;
         }
-        catch
+        catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"状态查询异常：{cmd} → {ex.GetType().Name} {ex.Message}");
             return null;
         }
     }

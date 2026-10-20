@@ -14,6 +14,7 @@ public enum AppTheme { System, Dark, Light }
 public static class ThemeManager
 {
     private static bool _stylesInstalled;
+    private static AppTheme _currentTheme = AppTheme.Dark;
 
     public static void Install(Application app)
     {
@@ -73,19 +74,35 @@ public static class ThemeManager
                 new Setter(Border.CornerRadiusProperty, new CornerRadius(10)),
             }
         });
+        app.ActualThemeVariantChanged += (_, _) =>
+        {
+            if (_currentTheme == AppTheme.System)
+                ApplyPalette(app, app.ActualThemeVariant == ThemeVariant.Dark);
+        };
         Apply(AppTheme.Dark);
     }
 
     public static void Apply(AppTheme theme)
     {
         if (Application.Current is not { } app) return;
+        _currentTheme = theme;
         app.RequestedThemeVariant = theme switch
         {
             AppTheme.Dark => ThemeVariant.Dark,
             AppTheme.Light => ThemeVariant.Light,
             _ => ThemeVariant.Default,
         };
-        var dark = theme == AppTheme.Dark || (theme == AppTheme.System && app.ActualThemeVariant == ThemeVariant.Dark);
+        var dark = theme switch
+        {
+            AppTheme.Dark => true,
+            AppTheme.Light => false,
+            _ => app.ActualThemeVariant == ThemeVariant.Dark,
+        };
+        ApplyPalette(app, dark);
+    }
+
+    private static void ApplyPalette(Application app, bool dark)
+    {
         var colors = dark
             ? new Dictionary<string, string>
             {
@@ -101,7 +118,14 @@ public static class ThemeManager
                 ["TextSecondary"] = "#6C6C70", ["Accent"] = "#007AFF", ["Success"] = "#248A3D",
                 ["Warning"] = "#9A6700", ["Danger"] = "#D70015",
             };
-        foreach (var (key, color) in colors) app.Resources[key] = new SolidColorBrush(Color.Parse(color));
+        foreach (var (key, color) in colors)
+        {
+            var parsedColor = Color.Parse(color);
+            if (app.Resources.TryGetResource(key, null, out var existing) && existing is SolidColorBrush brush)
+                brush.Color = parsedColor;
+            else
+                app.Resources[key] = new SolidColorBrush(parsedColor);
+        }
     }
 
     private static Style StyleFor<T>(AvaloniaProperty property, string resource) where T : Control =>

@@ -35,8 +35,15 @@ public sealed class CusdService(AtEngine engine)
             r = await engine.ExecuteAsync(
                 $@"AT+CUSD=1,""{code}"",15", AtEngine.LongTimeout, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            // 取消应向上传播，与其他服务保持一致；否则页面关闭时的取消
+            // 会显示成「发送异常」。
+            throw;
+        }
         catch (Exception ex)
         {
+            AppLog.Warn($"USSD 请求失败：{ex.GetType().Name} {ex.Message}");
             return new CusdResult(false, null, ex.Message);
         }
 

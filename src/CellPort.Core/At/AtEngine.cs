@@ -39,6 +39,9 @@ public enum AtCompletionStatus
     Timeout,
     TransportFailure,
     OperationRejected,
+
+    /// <summary>命中了调用方期待的中间提示符（如 AT+CMGS 的 "&gt;"）。</summary>
+    Prompt,
 }
 
 /// <summary>
@@ -54,8 +57,10 @@ public sealed class AtEngine : IAsyncDisposable
 
     private readonly PrioritizedCommandLock _commandLock = new();
     private readonly StringBuilder _pending = new();
+    private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private readonly List<string> _unsolicitedQueue = [];
     private readonly Lock _unsolicitedLock = new();
+    private int _disposed;
 
     /// <summary>收到未经请求的主动上报（如 +CMTI）时触发。</summary>
     public event EventHandler<string>? UnsolicitedReport;
@@ -77,24 +82,46 @@ public sealed class AtEngine : IAsyncDisposable
     /// <param name="command">指令正文，不含结尾的 CR。为空表示只发送一个 AT 探测。</param>
     /// <param name="timeout">超时。</param>
     /// <param name="ct">取消令牌。</param>
+    /// <param name="expectPrompt">
+    /// 可选的中间提示符（如 AT+CMGS 的 "&gt;"）。命中时立即返回成功结果，
+    /// 不再等待 5 秒超时。
+    /// </param>
     public async Task<AtResult> ExecuteAsync(
         string command,
         TimeSpan? timeout = null,
-        CancellationToken ct = default) =>
-        await ExecuteAsync(command, AtCommandPriority.Interactive, timeout, ct).ConfigureAwait(false);
+        CancellationToken ct = default,
+        string? expectPrompt = null) =>
+        await ExecuteAsync(command, AtCommandPriority.Interactive, timeout, ct, expectPrompt).ConfigureAwait(false);
 
     /// <summary>Executes a command at the requested priority without interrupting an active exchange.</summary>
     public async Task<AtResult> ExecuteAsync(
         string command,
         AtCommandPriority priority,
         TimeSpan? timeout = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? expectPrompt = null)
     {
         var effectiveTimeout = timeout ?? DefaultTimeout;
         var full = string.IsNullOrWhiteSpace(command) ? "AT" : command.Trim();
         var started = DateTime.UtcNow;
 
-        var lease = await _commandLock.AcquireAsync(priority, effectiveTimeout, ct).ConfigureAwait(false);
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return new AtResult(full, false, [], "AT 引擎已释放。", TimeSpan.Zero,
+                AtCompletionStatus.TransportFailure);
+        }
+
+        PrioritizedCommandLock.Lease? lease;
+        try
+        {
+            lease = await _commandLock.AcquireAsync(priority, effectiveTimeout, ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return new AtResult(full, false, [], "AT 引擎已释放。", DateTime.UtcNow - started,
+                AtCompletionStatus.TransportFailure);
+        }
+
         if (lease is null)
         {
             return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
@@ -112,7 +139,11 @@ public sealed class AtEngine : IAsyncDisposable
 
         try
         {
-            await Channel.WriteAsync(Encoding.ASCII.GetBytes(full + "\r"), ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            // Once an AT line starts writing, finish the line. Partial commands can desynchronize
+            // the modem parser; cancellation is honored while draining its response below.
+            await Channel.WriteAsync(Encoding.ASCII.GetBytes(full + "\r"), CancellationToken.None)
+                .ConfigureAwait(false);
             IoTrace?.Invoke(this, $">>> {full}\\r");
         }
         catch (Exception ex)
@@ -121,25 +152,136 @@ public sealed class AtEngine : IAsyncDisposable
             throw;
         }
 
-        return await ReadUntilFinalAsync(full, effectiveTimeout, started, ct).ConfigureAwait(false);
+        return await ReadUntilFinalAsync(full, effectiveTimeout, started, ct, expectPrompt).ConfigureAwait(false);
         
+    }
+
+    /// <summary>
+    /// Runs a prompt based exchange under one command lease. This keeps other AT commands from
+    /// being written while the modem is waiting for the payload (for example, SMS PDU data).
+    /// </summary>
+    internal async Task<AtResult> ExecutePromptExchangeAsync(
+        string command,
+        string payload,
+        TimeSpan promptTimeout,
+        TimeSpan responseTimeout,
+        CancellationToken ct = default,
+        string expectPrompt = ">")
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectPrompt);
+        var full = string.IsNullOrWhiteSpace(command) ? "AT" : command.Trim();
+        var started = DateTime.UtcNow;
+
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return new AtResult(full, false, [], "AT 引擎已释放。", TimeSpan.Zero,
+                AtCompletionStatus.TransportFailure);
+        }
+
+        PrioritizedCommandLock.Lease? lease;
+        try
+        {
+            lease = await _commandLock.AcquireAsync(
+                AtCommandPriority.Interactive, promptTimeout + responseTimeout, ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return new AtResult(full, false, [], "AT 引擎已释放。", DateTime.UtcNow - started,
+                AtCompletionStatus.TransportFailure);
+        }
+
+        if (lease is null)
+        {
+            return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
+                AtCompletionStatus.Timeout);
+        }
+
+        using var commandLease = lease;
+        if (DateTime.UtcNow - started >= promptTimeout)
+        {
+            return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
+                AtCompletionStatus.Timeout);
+        }
+
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            await Channel.WriteAsync(Encoding.ASCII.GetBytes(full + "\r"), CancellationToken.None)
+                .ConfigureAwait(false);
+            IoTrace?.Invoke(this, $">>> {full}\\r");
+        }
+        catch (Exception ex)
+        {
+            IoTrace?.Invoke(this, $"!!! write failed: {ex.GetType().Name} {ex.Message}");
+            throw;
+        }
+
+        var prompt = await ReadUntilFinalAsync(full, promptTimeout, started, ct, expectPrompt).ConfigureAwait(false);
+        if (prompt.Completion != AtCompletionStatus.Prompt)
+        {
+            return prompt;
+        }
+
+        if (ct.IsCancellationRequested)
+        {
+            // The prompt has put the modem in data-entry mode. Abort before releasing the lease.
+            await Channel.WriteAsync("\x1b"u8.ToArray(), CancellationToken.None).ConfigureAwait(false);
+            _ = await ReadUntilFinalAsync(full, responseTimeout, DateTime.UtcNow, ct, null).ConfigureAwait(false);
+            throw new OperationCanceledException(ct);
+        }
+
+        // Once payload writing begins, finish it so the modem cannot receive a partial PDU.
+        // Ctrl+Z commits the SMS; after that point, drain the final result even if the caller cancels.
+        try
+        {
+            await Channel.WriteAsync(Encoding.ASCII.GetBytes(payload), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A failed payload write may have left a partial body in the modem's input mode.
+            // Make a best effort to abort and consume its short final response before releasing the lease.
+            try
+            {
+                await Channel.WriteAsync("\x1b"u8.ToArray(), CancellationToken.None).ConfigureAwait(false);
+                _ = await ReadUntilFinalAsync(full, TimeSpan.FromSeconds(2), DateTime.UtcNow,
+                    CancellationToken.None, null).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original transport/write failure.
+            }
+            throw;
+        }
+        IoTrace?.Invoke(this, $">>> {payload.Replace("\r", "\\r").Replace("\n", "\\n")}");
+        return await ReadUntilFinalAsync(payload, responseTimeout, DateTime.UtcNow,
+            CancellationToken.None, null).ConfigureAwait(false);
     }
 
     private async Task<AtResult> ReadUntilFinalAsync(
         string command,
         TimeSpan timeout,
         DateTime started,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? expectPrompt)
     {
         var buffer = new byte[4096];
         var deadline = started + timeout;
         var lines = new List<string>();
-        var lastText = string.Empty;
+        var chunkText = string.Empty;
         var echoConsumed = false;
         var transportFailed = false;
+        var callerCancelled = false;
+        var activePrompt = expectPrompt;
+        var readToken = ct;
 
         while (DateTime.UtcNow < deadline)
         {
+            if (ct.IsCancellationRequested)
+            {
+                callerCancelled = true;
+                readToken = CancellationToken.None;
+            }
             var remaining = deadline - DateTime.UtcNow;
             if (remaining <= TimeSpan.Zero)
             {
@@ -150,7 +292,13 @@ public sealed class AtEngine : IAsyncDisposable
             int read;
             try
             {
-                read = await Channel.ReadAsync(buffer, slice, ct).ConfigureAwait(false);
+                read = await Channel.ReadAsync(buffer, slice, readToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                callerCancelled = true;
+                readToken = CancellationToken.None;
+                continue;
             }
             catch (Exception ex)
             {
@@ -159,11 +307,22 @@ public sealed class AtEngine : IAsyncDisposable
                 break;
             }
 
+            if (ct.IsCancellationRequested)
+            {
+                callerCancelled = true;
+                readToken = CancellationToken.None;
+            }
+
             if (read > 0)
             {
-                lastText = Encoding.UTF8.GetString(buffer, 0, read);
-                IoTrace?.Invoke(this, $"<<< {lastText.Replace("\r", "\\r").Replace("\n", "\\n")}");
-                _pending.Append(lastText);
+                // 使用有状态解码器：多字节字符跨读取块时不会被截断成 U+FFFD。
+                var charCount = _decoder.GetCharCount(buffer, 0, read);
+                var chars = new char[charCount];
+                _decoder.GetChars(buffer, 0, read, chars, 0);
+                chunkText = new string(chars);
+
+                IoTrace?.Invoke(this, $"<<< {chunkText.Replace("\r", "\\r").Replace("\n", "\\n")}");
+                _pending.Append(chunkText);
 
                 // 逐行提取已完成的行。
                 // 注意：ClassifyLine 的返回值语义是「该行是否已被消化、无需计入信息行」，
@@ -181,10 +340,30 @@ public sealed class AtEngine : IAsyncDisposable
                         continue;
                     }
 
+                    // 中间提示符（如 AT+CMGS 的 ">"）表示指令已受理、等待后续数据。
+                    if (activePrompt is not null && line.Equals(activePrompt, StringComparison.Ordinal))
+                    {
+                        if (callerCancelled)
+                        {
+                            // CMGS has entered data mode; ESC aborts the pending message. Keep
+                            // the command lease until the modem's final response is consumed.
+                            await Channel.WriteAsync("\x1b"u8.ToArray(), CancellationToken.None).ConfigureAwait(false);
+                            activePrompt = null;
+                            continue;
+                        }
+                        return new AtResult(command, true, lines,
+                            string.Join("\n", lines), DateTime.UtcNow - started,
+                            AtCompletionStatus.Prompt);
+                    }
+
                     var handled = ClassifyLine(line, command, out var isFinal, out var isOk);
 
                     if (isFinal)
                     {
+                        if (callerCancelled)
+                        {
+                            throw new OperationCanceledException(ct);
+                        }
                         return new AtResult(command, isOk, lines,
                             string.Join("\n", lines), DateTime.UtcNow - started,
                             isOk ? AtCompletionStatus.Ok : AtCompletionStatus.Error);
@@ -194,6 +373,21 @@ public sealed class AtEngine : IAsyncDisposable
                     {
                         lines.Add(line);
                     }
+                }
+
+                // 模块的 ">" 提示符通常不带行结束符（形如 "\r\n> "），
+                // 因此行循环取不到它，需要单独检查缓冲区尾部的未成行内容。
+                if (activePrompt is not null && TryTakeTrailingPrompt(activePrompt))
+                {
+                    if (callerCancelled)
+                    {
+                        await Channel.WriteAsync("\x1b"u8.ToArray(), CancellationToken.None).ConfigureAwait(false);
+                        activePrompt = null;
+                        continue;
+                    }
+                    return new AtResult(command, true, lines,
+                        string.Join("\n", lines), DateTime.UtcNow - started,
+                        AtCompletionStatus.Prompt);
                 }
             }
         }
@@ -209,8 +403,35 @@ public sealed class AtEngine : IAsyncDisposable
             _pending.Clear();
         }
 
+        if (callerCancelled || ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(ct);
+        }
+
         return new AtResult(command, false, lines, string.Join("\n", lines), DateTime.UtcNow - started,
             transportFailed ? AtCompletionStatus.TransportFailure : AtCompletionStatus.Timeout);
+    }
+
+    /// <summary>
+    /// 判断缓冲区末尾的「未成行」内容是否就是期待的提示符，是则消费并返回 true。
+    /// </summary>
+    private bool TryTakeTrailingPrompt(string prompt)
+    {
+        var text = _pending.ToString();
+        if (text.Length == 0)
+        {
+            return false;
+        }
+
+        var start = text.LastIndexOfAny(['\r', '\n']) + 1;
+        var tail = text[start..].Trim();
+        if (!tail.Equals(prompt, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _pending.Clear();
+        return true;
     }
 
     /// <summary>
@@ -342,6 +563,7 @@ public sealed class AtEngine : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Interlocked.Exchange(ref _disposed, 1);
         await Channel.DisposeAsync().ConfigureAwait(false);
         _commandLock.Dispose();
     }

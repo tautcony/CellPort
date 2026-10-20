@@ -92,51 +92,16 @@ public sealed class MacAtChannelProvider : IAtChannelProvider
         try { usbIdentities = _readUsbIdentities(); }
         catch { usbIdentities = new Dictionary<string, MacUsbSerialIdentity>(StringComparer.Ordinal); }
 
-        var ordered = OrderProbeCandidates(candidates, knownPorts, usbIdentities);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        foreach (var port in ordered)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (timeout.IsCancellationRequested) return null;
-            try
-            {
-                // Dispose the probe before handing the path back for the real connection.
-                // Sequential probing avoids racing to reopen a still-owned serial handle.
-                await using var channel = _create(port);
-                await channel.OpenAsync(timeout.Token).ConfigureAwait(false);
-                for (var attempt = 0; attempt < 2; attempt++)
-                {
-                    await channel.WriteAsync("AT\r"u8.ToArray(), timeout.Token).ConfigureAwait(false);
-                    var response = new StringBuilder();
-                    var buffer = new byte[256];
-                    var watch = Stopwatch.StartNew();
-                    while (watch.Elapsed < TimeSpan.FromMilliseconds(700))
-                    {
-                        timeout.Token.ThrowIfCancellationRequested();
-                        var count = await channel.ReadAsync(buffer, TimeSpan.FromMilliseconds(150), timeout.Token)
-                            .ConfigureAwait(false);
-                        response.Append(Encoding.ASCII.GetString(buffer, 0, count));
-                        if (response.ToString().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                            .Any(line => line.Trim() == "OK"))
-                            return port;
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                return null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException
-                                      or InvalidOperationException)
-            {
-                // A busy, unplugged or non-AT port must not prevent trying the next one.
-            }
-        }
-        return null;
+        var (ordered, priorityCount) = OrderProbeCandidates(candidates, knownPorts, usbIdentities);
+
+        // 已知模块端口/上次成功的端口串行优先探测；其余候选并发兜底，
+        // 避免「端口多时靠后的候选永远轮不到」。
+        return await AtPortProbe.FindAsync(
+            _create, ordered, priorityCount, TimeSpan.FromSeconds(15),
+            AtPortProbe.DefaultConcurrency, ct).ConfigureAwait(false);
     }
 
-    internal static IReadOnlyList<string> OrderProbeCandidates(
+    internal static (IReadOnlyList<string> Ordered, int PriorityCount) OrderProbeCandidates(
         IReadOnlyList<string> candidates,
         IReadOnlyList<string> knownPorts,
         IReadOnlyDictionary<string, MacUsbSerialIdentity> usbIdentities)
@@ -147,13 +112,17 @@ public sealed class MacAtChannelProvider : IAtChannelProvider
             .OrderBy(x => GetKnownIdPriority(usbIdentities[x.port]))
             .ThenBy(x => GetInterfacePriority(usbIdentities[x.port].InterfaceNumber))
             .ThenBy(x => x.index)
-            .Select(x => x.port);
+            .Select(x => x.port)
+            .ToList();
 
-        return modulePorts
+        var priority = modulePorts
             .Concat(knownPorts.Where(p => candidates.Contains(p, StringComparer.Ordinal)))
-            .Concat(candidates)
             .Distinct(StringComparer.Ordinal)
-            .ToArray();
+            .ToList();
+
+        var rest = candidates.Where(p => !priority.Contains(p, StringComparer.Ordinal));
+
+        return ([.. priority, .. rest], priority.Count);
     }
 
     private static bool IsKnownModule(MacUsbSerialIdentity identity) =>

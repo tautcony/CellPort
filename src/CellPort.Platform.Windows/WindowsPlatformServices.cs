@@ -17,7 +17,53 @@ public sealed class WindowsPlatformServices : IPlatformServices
     public IReadOnlyList<string> EnumerateSerialPorts() =>
         SerialAtChannel.EnumerateCandidates().Select(candidate => candidate.PortName).ToArray();
 
-    public IReadOnlyList<string> EnumerateKnownUsbDevices() => [];
+    /// <summary>
+    /// 已连接的已知模块摘要（与 macOS/Linux 保持一致的展示口径）。
+    /// 通过 PnP 实例 ID / HardwareID 匹配 VID&amp;PID，缺失时返回空列表。
+    /// </summary>
+    public IReadOnlyList<string> EnumerateKnownUsbDevices()
+    {
+        try
+        {
+            return DescribeKnownModules(WindowsUsbDeviceEnumerator.EnumeratePresent());
+        }
+        catch (Exception)
+        {
+            // 枚举失败（权限/驱动异常）不应影响诊断页其它信息
+            return [];
+        }
+    }
+
+    internal static IReadOnlyList<string> DescribeKnownModules(IReadOnlyList<WindowsPnpDeviceNode> nodes)
+    {
+        var labels = new List<string>();
+        foreach (var (vendorId, productId) in ModuleIdentity.KnownIds)
+        {
+            var marker = $"VID_{vendorId:X4}&PID_{productId:X4}";
+            if (!nodes.Any(node => MatchesModule(node, marker)))
+            {
+                continue;
+            }
+
+            var name = (vendorId, productId) == (ModuleIdentity.DjiVendorId, ModuleIdentity.DjiProductId)
+                ? "QDC507"
+                : "Quectel";
+            labels.Add($"{name} · {vendorId:X4}:{productId:X4}");
+        }
+
+        return labels;
+    }
+
+    private static bool MatchesModule(WindowsPnpDeviceNode node, string marker)
+    {
+        if (node.InstanceId.Contains(marker, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return !node.HardwareIds.IsDefaultOrEmpty &&
+               node.HardwareIds.Any(id => id.Contains(marker, StringComparison.OrdinalIgnoreCase));
+    }
 
     public string GetDiagnostics()
     {

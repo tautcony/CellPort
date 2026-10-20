@@ -137,6 +137,7 @@ public sealed class ModemManager : IAsyncDisposable
         await DisconnectAsync().ConfigureAwait(false);
 
         IAtChannel? channel = null;
+        string? serialPort = null;
 
         // 1) 优先尝试 USB 直控（WinUSB）
         //    若 MI_02 尚未绑定 WinUSB，会在枚举阶段就返回 null（很快）。
@@ -162,6 +163,9 @@ public sealed class ModemManager : IAsyncDisposable
             }
             else
             {
+                // 超时后探测仍可能在后台完成并返回一个已 claim 的接口。
+                // 必须在其完成时释放，否则句柄与 claim 永久持有（macOS 上表现为「第二次连不上」）。
+                DisposeChannelWhenCompleted(usbTask);
                 Trace("      USB 探测超时，转串口。");
             }
         }
@@ -170,8 +174,7 @@ public sealed class ModemManager : IAsyncDisposable
             Trace($"      USB 探测异常：{ex.GetType().Name}，转串口。");
         }
 
-        // 2) 回退到串口
-        if (channel is null)
+        async Task SelectSerialChannelAsync()
         {
             string? port;
             if (preferredSerialPort is not null)
@@ -182,37 +185,36 @@ public sealed class ModemManager : IAsyncDisposable
             else
             {
                 Trace("[2/5] 自动探测串口…");
-                var detectTask = _channels.DetectSerialAsync(_portHints, ct);
+                using var detectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var detectTask = _channels.DetectSerialAsync(_portHints, detectCts.Token);
                 var done2 = await Task.WhenAny(detectTask, Task.Delay(TimeSpan.FromSeconds(20), ct))
                     .ConfigureAwait(false);
-                port = done2 == detectTask
-                    ? await detectTask.ConfigureAwait(false)
-                    : null;
+                if (done2 == detectTask)
+                {
+                    port = await detectTask.ConfigureAwait(false);
+                }
+                else
+                {
+                    // 取消探测，让探测协程在 catch/finally 路径上归还已打开的串口，
+                    // 避免与随后的真实连接争用端口。
+                    await detectCts.CancelAsync().ConfigureAwait(false);
+                    ObserveDetached(detectTask);
+                    port = null;
+                }
                 Trace(port is null ? "      未找到 AT 串口。" : $"      找到 AT 串口：{port}");
             }
 
             if (port is not null)
             {
                 channel = _channels.CreateSerial(port);
-
-                // 记住成功端口：进程内提到列表首位，并通知宿主持久化。
-                _portHints.RemoveAll(p =>
-                    _channels.PortNameComparer.Equals(p, port));
-                _portHints.Insert(0, port);
-                if (_portHints.Count > 4)
-                {
-                    _portHints.RemoveRange(4, _portHints.Count - 4);
-                }
-
-                try
-                {
-                    RememberPort?.Invoke(port);
-                }
-                catch
-                {
-                    // 持久化失败不影响连接
-                }
+                serialPort = port;
             }
+        }
+
+        // 2) 回退到串口
+        if (channel is null)
+        {
+            await SelectSerialChannelAsync().ConfigureAwait(false);
         }
 
         if (channel is null)
@@ -221,48 +223,101 @@ public sealed class ModemManager : IAsyncDisposable
             return false;
         }
 
+        var selectedUsb = channel.Kind == AtChannelKind.UsbDirect;
         Trace($"[3/5] 打开通道：{channel.Description}");
+        AtEngine? engine = null;
         try
         {
-            await channel.OpenAsync(ct).ConfigureAwait(false);
-            Trace("      通道已打开。");
+            engine = await OpenAndProbeAsync(channel, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            Trace($"      打开失败：{ex.GetType().Name} {ex.Message}");
-            await channel.DisposeAsync().ConfigureAwait(false);
-            return false;
+            Trace($"      通道打开或 AT 探测失败：{ex.GetType().Name} {ex.Message}");
         }
 
-        var engine = new AtEngine(channel);
-        engine.IoTrace += (_, msg) => Trace($"      IO {msg}");
-
-        // 3) 探测 AT 通道是否真的可用
-        Trace("[4/5] 发送 AT 探测…");
-        var probe = await engine.ExecuteAsync("AT", TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
-        if (!probe.Succeeded)
+        if (engine is null && selectedUsb)
         {
-            Trace("      AT 无响应。");
-            await engine.DisposeAsync().ConfigureAwait(false);
+            // USB 接口枚举或描述符只能缩小候选范围，不能保证它真的回 AT。
+            // 若探测失败，继续走串口通道，避免错误的 MI_02/MI_03 阻断连接。
+            Trace("      USB 通道未通过 AT 探测，改用串口探测。");
+            channel = null;
+            serialPort = null;
+            await SelectSerialChannelAsync().ConfigureAwait(false);
+            if (channel is not null)
+            {
+                try
+                {
+                    Trace($"[3/5] 打开串口通道：{channel.Description}");
+                    engine = await OpenAndProbeAsync(channel, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Trace($"      串口打开或 AT 探测失败：{ex.GetType().Name} {ex.Message}");
+                }
+            }
+        }
+
+        if (engine is null)
+        {
+            Trace("      AT 通道无响应。");
             return false;
         }
+
+        engine.IoTrace += (_, msg) => Trace($"      IO {msg}");
         Trace("      AT 响应正常。");
+
+        // 只有确认 AT 真的可用后才记住端口：此前写入会把坏端口永久置顶，
+        // 拖慢之后每一次连接。
+        if (serialPort is not null)
+        {
+            RememberSuccessfulPort(serialPort);
+        }
 
         Engine = engine;
         CallTracker.BeginModuleSession();
 
-        Sms = new SmsService(engine);
-        Calls = new CallService(engine, CallTracker);
+        var sms = new SmsService(engine);
+        var calls = new CallService(engine, CallTracker);
+        Sms = sms;
+        Calls = calls;
         Info = new DeviceInfoService(engine);
         Cusd = new CusdService(engine);
         Phonebook = new PhonebookService(engine);
 
-        await Sms.InitializeAsync(ct).ConfigureAwait(false);
-        await Calls.InitializeAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await sms.InitializeAsync(ct).ConfigureAwait(false);
+            await calls.InitializeAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            CallTracker.MarkModuleDisconnected();
+            Sms = null;
+            Calls = null;
+            Info = null;
+            Cusd = null;
+            Phonebook = null;
+            if (ReferenceEquals(Engine, engine))
+            {
+                Engine = null;
+            }
+            await engine.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
 
         // 4) 启动主动上报泵
-        _pumpCts = new CancellationTokenSource();
-        _pumpTask = Task.Run(() => PumpAsync(_pumpCts.Token), ct);
+        // 令牌源先落到局部变量：闭包若读字段，可能在断开后读到 null。
+        var pumpCts = new CancellationTokenSource();
+        _pumpCts = pumpCts;
+        _pumpTask = Task.Run(() => PumpAsync(pumpCts.Token), CancellationToken.None);
 
         ConnectionChanged?.Invoke(this, true);
 
@@ -272,20 +327,63 @@ public sealed class ModemManager : IAsyncDisposable
         // 6) 同步已存短信
         try
         {
-            await Sms.SyncStoredAsync(ct).ConfigureAwait(false);
+            await sms.SyncStoredAsync(ct).ConfigureAwait(false);
         }
-        catch
+        catch (OperationCanceledException)
+        {
+            // 取消不影响连接结果
+        }
+        catch (Exception ex)
         {
             // 同步失败不影响连接
+            AppLog.Warn($"首次短信同步失败：{ex.GetType().Name} {ex.Message}");
         }
 
         return true;
+    }
+
+    private static async Task<AtEngine?> OpenAndProbeAsync(IAtChannel channel, CancellationToken ct)
+    {
+        AtEngine? engine = null;
+        var keep = false;
+        try
+        {
+            await channel.OpenAsync(ct).ConfigureAwait(false);
+            engine = new AtEngine(channel);
+            var probe = await engine.ExecuteAsync("AT", TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+            if (!probe.Succeeded)
+            {
+                return null;
+            }
+
+            keep = true;
+            return engine;
+        }
+        finally
+        {
+            if (!keep)
+            {
+                if (engine is not null)
+                {
+                    await engine.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    await channel.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+        }
     }
 
     /// <summary>断开连接。</summary>
     public async Task DisconnectAsync()
     {
         CallTracker.MarkModuleDisconnected();
+
+        // 先取消泵，再等待它退出，最后才释放引擎：
+        // 否则泵协程可能在引擎已 Dispose 后仍尝试 DrainUnsolicited。
+        var pumpTask = _pumpTask;
+        _pumpTask = null;
 
         if (_pumpCts is not null)
         {
@@ -294,42 +392,118 @@ public sealed class ModemManager : IAsyncDisposable
             _pumpCts = null;
         }
 
-        if (Engine is not null)
+        if (pumpTask is not null)
         {
-            await Engine.DisposeAsync().ConfigureAwait(false);
-            Engine = null;
+            try
+            {
+                await pumpTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // 超时或泵内部异常都不应阻塞断开流程。
+            }
         }
 
+        // 统一置空全部服务引用：只清一半会留下指向已释放引擎的悬垂服务。
         Sms = null;
         Calls = null;
         Info = null;
+        Cusd = null;
+        Phonebook = null;
         Status = new DeviceStatus();
 
+        var engine = Engine;
+        Engine = null;
+        if (engine is not null)
+        {
+            await engine.DisposeAsync().ConfigureAwait(false);
+        }
+
         ConnectionChanged?.Invoke(this, false);
+    }
+
+    /// <summary>
+    /// 记录一次确认可用的串口：进程内提到列表首位，并通知宿主持久化。
+    /// </summary>
+    private void RememberSuccessfulPort(string port)
+    {
+        _portHints.RemoveAll(p => _channels.PortNameComparer.Equals(p, port));
+        _portHints.Insert(0, port);
+        if (_portHints.Count > 4)
+        {
+            _portHints.RemoveRange(4, _portHints.Count - 4);
+        }
+
+        try
+        {
+            RememberPort?.Invoke(port);
+        }
+        catch
+        {
+            // 持久化失败不影响连接
+        }
+    }
+
+    /// <summary>
+    /// 探测已超时但任务仍会完成时调用：任务返回的通道必须释放，
+    /// 否则底层句柄与接口声明会一直被持有。
+    /// </summary>
+    private static void DisposeChannelWhenCompleted(Task<IAtChannel?> task)
+    {
+        _ = task.ContinueWith(static t =>
+        {
+            if (t.Status == TaskStatus.RanToCompletion)
+            {
+                if (t.Result is { } late)
+                {
+                    _ = late.DisposeAsync().AsTask();
+                }
+                return;
+            }
+
+            _ = t.Exception; // 观察异常，避免未观测任务异常
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    /// <summary>观察一个已放弃等待的任务，避免未观测异常。</summary>
+    private static void ObserveDetached(Task task)
+    {
+        _ = task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     /// <summary>刷新状态。</summary>
     public async Task RefreshStatusAsync(CancellationToken ct = default)
     {
-        if (Info is null)
+        // 捕获到局部变量：await 期间字段可能被 DisconnectAsync 置空。
+        var info = Info;
+        if (info is null)
         {
             return;
         }
         try
         {
-            Status = await Info.ReadStatusAsync(ct).ConfigureAwait(false);
+            Status = await info.ReadStatusAsync(ct).ConfigureAwait(false);
             StatusUpdated?.Invoke(this, Status);
         }
-        catch
+        catch (OperationCanceledException)
         {
-            // 刷新失败保留上次快照
+            // 取消：保留上次快照。
+        }
+        catch (Exception ex)
+        {
+            // 刷新失败保留上次快照，但留下可排障的日志。
+            AppLog.Warn($"状态刷新失败：{ex.GetType().Name} {ex.Message}");
         }
     }
 
     /// <summary>执行任意 AT 指令（供控制台使用）。</summary>
     public async Task<AtResult> ExecuteAtAsync(string command, CancellationToken ct = default)
     {
-        if (Engine is null)
+        // 捕获到局部变量：await 期间字段可能被 DisconnectAsync 置空。
+        var engine = Engine;
+        if (engine is null)
         {
             return new AtResult(command, false, [], "未连接模块。", TimeSpan.Zero,
                 AtCompletionStatus.TransportFailure);
@@ -341,7 +515,7 @@ public sealed class ModemManager : IAsyncDisposable
             return new AtResult(command, false, [], admission.ErrorCode ?? "OperationConflict", TimeSpan.Zero,
                 AtCompletionStatus.OperationRejected);
         await using var lease = admission.Lease;
-        return await Engine.ExecuteAsync(command, TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+        return await engine.ExecuteAsync(command, TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
     }
 
     public async ValueTask<ModuleOperationAdmissionResult> TryAcquireOperationAsync(
@@ -356,23 +530,27 @@ public sealed class ModemManager : IAsyncDisposable
 
     public async Task<bool> SendSmsAsync(string number, string body, CancellationToken ct = default)
     {
-        if (Sms is null) return false;
+        // 捕获到局部变量：await 期间字段可能被 DisconnectAsync 置空。
+        var sms = Sms;
+        if (sms is null) return false;
         var admission = await TryAcquireOperationAsync(ModuleOperationKind.SmsWrite, cancellationToken: ct)
             .ConfigureAwait(false);
         if (!admission.Allowed) return false;
         await using var lease = admission.Lease;
-        return await Sms.SendAsync(number, body, ct).ConfigureAwait(false);
+        return await sms.SendAsync(number, body, ct).ConfigureAwait(false);
     }
 
     public async Task<CusdService.CusdResult> SendUssdAsync(string code, CancellationToken ct = default)
     {
-        if (Cusd is null) return new CusdService.CusdResult(false, null, "模块未连接");
+        // 捕获到局部变量：await 期间字段可能被 DisconnectAsync 置空。
+        var cusd = Cusd;
+        if (cusd is null) return new CusdService.CusdResult(false, null, "模块未连接");
         var admission = await TryAcquireOperationAsync(ModuleOperationKind.RawConsoleCommand, cancellationToken: ct)
             .ConfigureAwait(false);
         if (!admission.Allowed)
             return new CusdService.CusdResult(false, null, $"操作被仲裁器拒绝：{admission.ErrorCode}");
         await using var lease = admission.Lease;
-        return await Cusd.SendAsync(code, ct).ConfigureAwait(false);
+        return await cusd.SendAsync(code, ct).ConfigureAwait(false);
     }
 
     public Task<bool> DialAsync(string number, CancellationToken ct = default) =>
@@ -675,12 +853,14 @@ public sealed class ModemManager : IAsyncDisposable
 
     private async Task<bool> RunCallControlAsync(Func<CallService, Task<bool>> operation, CancellationToken ct)
     {
-        if (Calls is null) return false;
+        // 捕获到局部变量：await 期间字段可能被 DisconnectAsync 置空。
+        var calls = Calls;
+        if (calls is null) return false;
         var admission = await TryAcquireOperationAsync(ModuleOperationKind.CallControl, cancellationToken: ct)
             .ConfigureAwait(false);
         if (!admission.Allowed) return false;
         await using var lease = admission.Lease;
-        return await operation(Calls).ConfigureAwait(false);
+        return await operation(calls).ConfigureAwait(false);
     }
 
     internal static (ModuleOperationKind Kind, bool RawCommandIsReadOnly) ClassifyAtCommand(string command)

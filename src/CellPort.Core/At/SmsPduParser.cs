@@ -85,14 +85,9 @@ public static class SmsPduParser
             var bytes = Convert.FromHexString(pdu.Trim().Trim('"'));
             var reader = new PduReader(bytes);
 
-            // 第一字节：SMSC 地址长度（以字节计）
+            // 第一字节：SMSC 地址长度（以字节计，已包含 type-of-address 字节）
             var smscLen = reader.ReadByte();
             reader.Skip(smscLen);
-            if (smscLen == 0)
-            {
-                reader.Skip(0);
-            }
-            // 注意：smscLen 已包含 type-of-address 字节，直接跳过即可。
 
             var firstOctet = reader.ReadByte();
             var hasUdh = (firstOctet & 0x40) != 0;         // TP-UDHI
@@ -128,19 +123,20 @@ public static class SmsPduParser
             }
 
             var udLength = reader.ReadByte();
-            var ud = reader.ReadRemaining();
+            var userData = reader.ReadRemaining();
 
-            // UDH 处理
+            // UDH 处理：UDHL 字节 + UDH 本身，整体按字节计数（GSM7 解码需要该偏移）。
             int? concatRef = null, concatTotal = null, concatPart = null;
-            if (hasUdh && ud.Length > 1)
+            var udhOctets = 0;
+            if (hasUdh && userData.Length > 0)
             {
-                var udhLen = ud[0];
-                var udh = ud.AsSpan(1, Math.Min(udhLen, ud.Length - 1));
-                ParseUdh(udh, ref concatRef, ref concatTotal, ref concatPart);
-                ud = ud[(1 + udhLen)..];
+                var udhLen = userData[0];
+                var available = Math.Min(udhLen, userData.Length - 1);
+                ParseUdh(userData.AsSpan(1, available), ref concatRef, ref concatTotal, ref concatPart);
+                udhOctets = Math.Min(1 + udhLen, userData.Length);
             }
 
-            var body = DecodeUserData(ud, dcs, udLength, hasUdh);
+            var body = DecodeUserData(userData, dcs, udLength, hasUdh, udhOctets);
 
             return new SmsMessage
             {
@@ -197,35 +193,42 @@ public static class SmsPduParser
         }
     }
 
-    private static string DecodeUserData(byte[] ud, byte dcs, int udLength, bool hasUdh)
+    private static string DecodeUserData(byte[] ud, byte dcs, int udLength, bool hasUdh, int udhOctets)
     {
         var encoding = (dcs >> 2) & 0x03; // 00=7bit, 01=8bit, 10=UCS2
 
         if (encoding == 0x02)
         {
-            // UCS2
-            var count = Math.Min(ud.Length, udLength);
+            // UCS2：UDL 是字节数，且包含 UDH 占用的字节。
+            var count = Math.Clamp(Math.Min(ud.Length, udLength) - udhOctets, 0, int.MaxValue);
             if (count % 2 != 0)
             {
                 count--;
             }
-            return count <= 0 ? string.Empty : Encoding.BigEndianUnicode.GetString(ud, 0, count);
+            return count <= 0
+                ? string.Empty
+                : Encoding.BigEndianUnicode.GetString(ud, udhOctets, count);
         }
 
         if (encoding == 0x01)
         {
-            var count = Math.Min(ud.Length, udLength);
-            return Encoding.Latin1.GetString(ud, 0, count);
+            var count = Math.Clamp(Math.Min(ud.Length, udLength) - udhOctets, 0, int.MaxValue);
+            return count <= 0 ? string.Empty : Encoding.Latin1.GetString(ud, udhOctets, count);
         }
 
-        // GSM 7-bit：UDL 对含 UDH 的报文中是「总 septet 数」，需扣除 UDH 占用的 septet。
-        var udhSeptets = 0;
-        if (hasUdh && ud.Length > 0)
+        // GSM 7-bit：无 UDH 时 UDL 就是正文 septet 数。
+        if (!hasUdh)
         {
-            udhSeptets = (ud[0] + 1) * 8 / 7 + (((ud[0] + 1) * 8 % 7) != 0 ? 1 : 0);
+            return SmsCodec.DecodeGsm7Bit(ud, udLength);
         }
+
+        // 有 UDH 时 UDL 是「UDH + 正文」的总 septet 数，且 6 字节 UDH 会补 1 个填充位，
+        // 因此正文从第 ceil(udhOctets*8/7) 个 septet 开始。
+        var udhSeptets = (udhOctets * 8 + 6) / 7;
         var septetCount = udLength - udhSeptets;
-        return SmsCodec.DecodeGsm7Bit(ud, septetCount);
+        return septetCount <= 0
+            ? string.Empty
+            : SmsCodec.DecodeGsm7Bit(ud, septetCount, startSeptet: udhSeptets);
     }
 
     private static string ReadAddress(ref PduReader reader, out byte typeOfAddress)
@@ -280,10 +283,14 @@ public static class SmsPduParser
             var minute = Dec(raw[4]);
             var second = Dec(raw[5]);
 
-            // 时区：15 分钟为单位，含符号位（补码形式）
-            var tzRaw = Dec(raw[6]);
-            var tzQuarters = tzRaw & 0x7F;
-            var negative = (tzRaw & 0x80) != 0;
+            // 时区：15 分钟为单位。符号位是「十位半字节」的最高位（0x08）——
+            // 十位只可能取 0..7，该位因此空闲；个位半字节 0..9 全用，不能放符号。
+            // 必须在 Dec() 之前按原始字节取值，否则符号位会被当成数字位。
+            var tzOctet = raw[6];
+            var negative = (tzOctet & 0x08) != 0;
+            var tzTens = tzOctet & 0x07;
+            var tzUnits = (tzOctet >> 4) & 0x0F;
+            var tzQuarters = tzTens * 10 + tzUnits;
             var offsetMinutes = tzQuarters * 15 * (negative ? -1 : 1);
 
             var fullYear = year < 70 ? 2000 + year : 1900 + year;

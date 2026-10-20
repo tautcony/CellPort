@@ -68,6 +68,8 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
     private bool _audioPrepareInFlight;
     private bool _usbCommitStarted;
     private CancellationTokenSource? _prepareCancellation;
+    private CancellationTokenSource? _committedPrepareCancellation;
+    private bool _semaphoreDisposed;
     private bool _disposed;
 
     public DeviceOperationCoordinator(TimeProvider? timeProvider = null) =>
@@ -153,7 +155,7 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
             }
         }
         return new DeviceOperationAcquireResult(new DeviceOperationLease(this, request.Kind, ownsSemaphore: true,
-            prepareCancellation?.Token ?? CancellationToken.None), null);
+            prepareCancellation), null);
     }
 
     /// <summary>Signals a prepare operation when a new call, occupancy, or unknown state arrives.</summary>
@@ -195,7 +197,10 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
             _audioSessionOwned = true;
             _audioPrepareInFlight = false;
             _usbCommitStarted = false;
-            _prepareCancellation?.Dispose();
+
+            // 不能在这里 Dispose：lease.OperationCancellationToken 仍被外部持有，
+            // 之后再 Register 会抛 ObjectDisposedException。令牌源随会话一起释放。
+            _committedPrepareCancellation = _prepareCancellation;
             _prepareCancellation = null;
         }
     }
@@ -212,19 +217,42 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
             _prepareCancellation = null;
         }
         cancellation?.Cancel();
-        cancellation?.Dispose();
     }
 
     internal void CommitVerifiedAudioRelease()
     {
+        CancellationTokenSource? committed;
         lock (_stateGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             _audioSessionOwned = false;
+            committed = _committedPrepareCancellation;
+            _committedPrepareCancellation = null;
         }
+        // 会话已确认归还，prepare 令牌源此时才可安全释放。
+        committed?.Dispose();
     }
 
-    internal void ReleaseSemaphore() => _moduleOperation.Release();
+    internal void ReleaseSemaphore()
+    {
+        // 协调器已释放后，仍在飞的租约回收时不能再 Release 已 Dispose 的信号量。
+        lock (_stateGate)
+        {
+            if (_semaphoreDisposed)
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            _moduleOperation.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 与 DisposeAsync 竞争：忽略即可，信号量本身已不再使用。
+        }
+    }
 
     private bool ConflictsWithOwnedAudioSession(DeviceOperationRequest request)
     {
@@ -285,13 +313,46 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
 
     public async ValueTask DisposeAsync()
     {
+        CancellationTokenSource? committed;
         lock (_stateGate)
         {
             if (_disposed) return;
             _disposed = true;
+            committed = _committedPrepareCancellation;
         }
+
         CancelUncommittedAudioPrepare();
+
+        // 等待在飞操作结束，但绝不无限等待：租约泄漏时也应能完成释放流程。
+        var acquired = await _moduleOperation.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        if (!acquired)
+        {
+            // 仍有租约未归还：在租约释放后完成清理，不能销毁仍被占用的信号量。
+            _ = DisposeAfterActiveOperationAsync(committed);
+            return;
+        }
+
+        CompleteDisposal(committed);
+    }
+
+    private async Task DisposeAfterActiveOperationAsync(CancellationTokenSource? committed)
+    {
         await _moduleOperation.WaitAsync().ConfigureAwait(false);
+        CompleteDisposal(committed);
+    }
+
+    private void CompleteDisposal(CancellationTokenSource? committed)
+    {
+        lock (_stateGate)
+        {
+            _semaphoreDisposed = true;
+            if (ReferenceEquals(_committedPrepareCancellation, committed))
+            {
+                _committedPrepareCancellation = null;
+            }
+        }
+        // 活动操作结束后再释放已提交会话的 CTS，避免持有令牌的租约在释放期间注册回调。
+        committed?.Dispose();
         _moduleOperation.Release();
         _moduleOperation.Dispose();
     }
@@ -301,16 +362,18 @@ public sealed class DeviceOperationLease : IModuleOperationLease, IDisposable
 {
     private readonly DeviceOperationCoordinator _coordinator;
     private readonly bool _ownsSemaphore;
+    private readonly CancellationTokenSource? _prepareCancellation;
     private bool _audioPrepareCommitted;
     private int _disposed;
 
     internal DeviceOperationLease(DeviceOperationCoordinator coordinator, DeviceOperationKind kind, bool ownsSemaphore,
-        CancellationToken operationCancellationToken = default)
+        CancellationTokenSource? prepareCancellation = null)
     {
         _coordinator = coordinator;
         Kind = kind;
         _ownsSemaphore = ownsSemaphore;
-        OperationCancellationToken = operationCancellationToken;
+        _prepareCancellation = prepareCancellation;
+        OperationCancellationToken = prepareCancellation?.Token ?? CancellationToken.None;
     }
 
     public DeviceOperationKind Kind { get; }
@@ -343,7 +406,10 @@ public sealed class DeviceOperationLease : IModuleOperationLease, IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 0 && _ownsSemaphore)
         {
             if (Kind == DeviceOperationKind.AudioPrepare && !_audioPrepareCommitted)
+            {
                 _coordinator.CancelUncommittedAudioPrepare();
+                _prepareCancellation?.Dispose();
+            }
             _coordinator.ReleaseSemaphore();
         }
     }
