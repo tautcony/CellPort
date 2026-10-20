@@ -1,0 +1,159 @@
+src/CellPort.App/Views/DevicePage.cs
+  h_3705811fa4502c 429
+src/CellPort.Audio.Core/Resources/RuntimeManifestValidator.cs
+  h_3705811fa4502c 79,328
+src/CellPort.Core/Transport/AdbDeviceCatalog.cs
+  h_3705811fa4502c 90,198,217
+src/CellPort.Platform.MacOS/LibUsbAtChannel.cs
+  h_3705811fa4502c 118,123,153
+tests/CellPort.Audio.Core.Tests/RuntimeManifestValidatorTests.cs
+  h_3705811fa4502c 161-162
+src/CellPort.Core/Services/BerTlv.cs
+  h_3705811fa4502c 113
+src/CellPort.Audio.Core/Services/CallStateFreshnessGate.cs
+  h_3705811fa4502c 13
+src/CellPort.App/Views/CallsPage.cs
+  h_3705811fa4502c 350
+src/CellPort.Audio.Core/Services/AudioMediaActivationGate.cs
+  h_3705811fa4502c 11,16-17,26,28,54,59,137,142,161,165-166,201,206
+  h_3705811fa4502c 27
+src/CellPort.App/Views/SettingsPage.cs
+  h_3705811fa4502c 44
+src/CellPort.Transport.Serial/SerialAtChannel.cs
+  h_3705811fa4502c 116,126,198,227
+src/CellPort.App/Views/EsimPage.cs
+  h_3705811fa4502c 43,90,107
+  h_3705811fa4502c 35,220-221
+src/CellPort.Audio.Core/Services/AudioFrameBuffer.cs
+  h_3705811fa4502c 23-25,29-33,43,50,52,57-58,61-62,73,75,80,84-85,87,99,129-130,142-144,163,165,167,169,178,181,216-217,234-235,237,241
+tests/CellPort.Audio.Core.Tests/DeviceOperationCoordinatorTests.cs
+  h_3705811fa4502c 143
+src/CellPort.Core/Services/CallService.cs
+  h_3705811fa4502c 85,87-88,90,107,110,186,267,269,313,317,368,372,413,422
+tests/CellPort.App.Tests/DevicePageTests.cs
+  h_3705811fa4502c 48-49,61,77,186,189-190
+tests/CellPort.App.Tests/SmsPageTests.cs
+  h_3705811fa4502c 151,180
+src/CellPort.Core/Services/DeviceInfoService.cs
+  h_3705811fa4502c 151,280
+tests/CellPort.Audio.Core.Tests/AudioFrameBufferTests.cs
+  h_3705811fa4502c 38
+src/CellPort.App/Views/ConsolePage.cs
+  h_3705811fa4502c 30,34,48,51,54-55,61-64,78,82,97-98
+src/CellPort.Core/At/AtEngine.cs
+  h_3705811fa4502c 58,68,72,105-107,113-116,121,123-125,153,345
+  h_3705811fa4502c 109-111,117-120
+tests/CellPort.App.Tests/EsimPageTests.cs
+  h_3705811fa4502c 61,229,379,529
+  h_3705811fa4502c 30,225,228
+src/CellPort.Core/Services/CusdService.cs
+  h_3705811fa4502c 35
+src/CellPort.App/MainWindow.cs
+  h_3705811fa4502c 17,30,45-46,48-59,62,67-68,70-71,75-77,80,83,88,91,96,134,141,144,160-161,165-166,194,204,213,224,236-237,259,261-262,269,273-274,277,308,336,354,360
+  h_3705811fa4502c 31,268,271,297-298,302,314
+src/CellPort.Core/Services/SmsService.cs
+  h_3705811fa4502c 14,383
+tests/CellPort.App.Tests/CallsDeviceTestModem.cs
+  s_3c343ef84de0f2::t_96e511a809bcce 38
+  s_3c343ef84de0f2::t_2a2980a02bddfd 37
+  h_3705811fa4502c 17
+src/CellPort.Core/Services/LogicalChannelEs10.cs
+  h_3705811fa4502c 29,33,60,87,89,116,124,126-127,142,148,152,202,218,237,243,301,508,566,574,598,652,680,791,857
+src/CellPort.Core/At/SmsCodec.cs
+  h_3705811fa4502c 40,46,75-77,79,100,134,151
+src/CellPort.Platform.MacOS/MacUsbSerialIdentityReader.cs
+  h_3705811fa4502c 47,75
+src/CellPort.Core/At/PrioritizedCommandLock.cs
+  h_3705811fa4502c 7
+src/CellPort.Audio.Core/Services/DeviceOperationCoordinator.cs
+  h_3705811fa4502c 65,114
+src/CellPort.App/Views/SmsPage.cs
+  h_3705811fa4502c 98
+  h_3705811fa4502c 96-97,102
+src/CellPort.Core/Services/CallTracker.cs
+  h_3705811fa4502c 50,194
+tests/CellPort.Platform.MacOS.Tests/LibUsbAtChannelTests.cs
+  s_3c343ef84de0f2::t_a930e9ebaa6a45 15
+  s_3c343ef84de0f2::t_97d032358b29b7 97
+  h_3705811fa4502c 26-27,53-54,56,71-72,74,84,87,92,98-99
+  s_3c343ef84de0f2::t_62c0e43bb33ed8 16
+  h_3705811fa4502c 52,55,69-70,73,82-83,85-86,88-91,95
+src/CellPort.Platform.Linux/LinuxUsbDeviceCatalog.cs
+  h_3705811fa4502c 183
+tests/CellPort.Core.Tests/AtEnginePriorityTests.cs
+  h_3705811fa4502c 30,53,75,91
+tests/CellPort.Core.Tests/AudioDiagnosticExporterTests.cs
+  s_3c343ef84de0f2::t_d8812620800dcb 24
+  s_3c343ef84de0f2::t_9fbd902037a094 23
+src/CellPort.Audio.Core/Services/AudioSessionLifecycle.cs
+  h_3705811fa4502c 37,167,185
+tests/CellPort.App.Tests/ConsoleTests.cs
+  h_3705811fa4502c 24
+tests/CellPort.Core.Tests/ModemManagerTests.cs
+  s_3c343ef84de0f2::t_f80308fdcd5046 76
+  h_3705811fa4502c 37,118,222
+  s_3c343ef84de0f2::t_10c4e8735dd86f 72
+  s_3c343ef84de0f2::t_92724eae20144e 73
+  h_3705811fa4502c 34-36
+tests/CellPort.Core.Tests/Es10RequestEncodingTests.cs
+  h_3705811fa4502c 109
+src/CellPort.Core/At/SmsPduParser.cs
+  h_3705811fa4502c 304
+  s_3c343ef84de0f2::t_97085f67979e42 305
+  h_3705811fa4502c 103,171,236,241,244,251
+src/CellPort.Core/Services/AppLog.cs
+  h_3705811fa4502c 11,82
+  h_3705811fa4502c 34
+tests/CellPort.Core.Tests/AdbDeviceCatalogTests.cs
+  h_3705811fa4502c 32,98,128
+tests/CellPort.Platform.Linux.Tests/LinuxUsbDeviceCatalogTests.cs
+  h_3705811fa4502c 31
+tests/CellPort.Core.Tests/WindowsModuleIdentityResolverTests.cs
+  h_3705811fa4502c 25,35,39,52-53,56,73-74,82
+  h_3705811fa4502c 72,75-81
+src/CellPort.Platform.MacOS/MacAtChannelProvider.cs
+  h_3705811fa4502c 66
+src/CellPort.Core/Services/ModuleOperationAdmission.cs
+  h_3705811fa4502c 17
+src/CellPort.Core/Transport/AdbTransportClient.cs
+  h_3705811fa4502c 157
+src/CellPort.Core/Services/PhonebookService.cs
+  h_3705811fa4502c 138
+src/CellPort.App/Services/ThemeManager.cs
+  h_3705811fa4502c 3-4,22,31,61
+  s_3c343ef84de0f2::t_7297eea7a1ccb0 46-47
+  s_3c343ef84de0f2::t_8ad0f8c381b4d7 43-45
+  h_3705811fa4502c 32,39-42,54-56
+src/CellPort.Platform.MacOS/LibUsbApi.cs
+  h_3705811fa4502c 115
+tests/CellPort.Audio.Core.Tests/CallFreshnessQueueIntegrationTests.cs
+  h_3705811fa4502c 59
+src/CellPort.Platform.Linux/LinuxAdbTransportSelector.cs
+  h_3705811fa4502c 63
+src/CellPort.Core/Services/ModemManager.cs
+  h_3705811fa4502c 76,103,109,251,265,297,299-300,332,344,415,538,645,728,733
+  s_3c343ef84de0f2::t_f64d4e2764a57c 477
+tests/CellPort.App.Tests/TestAppBuilder.cs
+  h_3705811fa4502c 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "40c81dc3019eaff6efd3f091a8dfd43cddaf9681",
+  "prompts": {},
+  "humans": {
+    "h_3705811fa4502c": {
+      "author": "TautCony <i@tautcony.xyz>"
+    }
+  },
+  "sessions": {
+    "s_3c343ef84de0f2": {
+      "agent_id": {
+        "tool": "github-copilot-jetbrains",
+        "id": "1792479392660",
+        "model": "unknown"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    }
+  }
+}
