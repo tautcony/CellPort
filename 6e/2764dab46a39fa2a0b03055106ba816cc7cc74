@@ -1,0 +1,37 @@
+.gitignore
+  s_53ba7c1dba16bd::t_3ab283e7ac66cb 9
+  s_270a2e06a37363::t_87a6ac6e67eb00 20-21
+.github/workflows/platform-checks.yml
+  s_270a2e06a37363::t_94bf63182366e8 50-52
+tests/CellPort.App.Tests/DevicePageTests.cs
+  s_270a2e06a37363::t_94bf63182366e8 30-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e2764dab46a39fa2a0b03055106ba816cc7cc74",
+  "prompts": {},
+  "humans": {
+    "h_3705811fa4502c": {
+      "author": "TautCony <i@tautcony.xyz>"
+    }
+  },
+  "sessions": {
+    "s_270a2e06a37363": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1584a-eb6c-7b02-ab48-8ee8b9615978",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    },
+    "s_53ba7c1dba16bd": {
+      "agent_id": {
+        "tool": "github-copilot-jetbrains",
+        "id": "1792482486343",
+        "model": "unknown"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    }
+  }
+}
