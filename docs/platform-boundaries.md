@@ -1,6 +1,6 @@
 # 平台边界与兼容回归
 
-当前 canonical app 是 Avalonia `CellPort.App`。macOS 通过 VID/PID 和 IOKit location 匹配模块，以 libusb 打开 AT 接口，并回退到系统串口；Windows 保留 USB/WinUSB 功能。`CellPort.sln` 是默认便携 solution；Windows 专用诊断宿主和工具在 `CellPort.Windows.sln`。迁移页面行为与验收状态见 [Avalonia 迁移矩阵](avalonia-migration.md)。
+当前 canonical app 是 Avalonia `CellPort.App`。macOS 通过 VID/PID 和 IOKit location 匹配模块，以 libusb 打开 AT 接口，并回退到系统串口；Windows 保留 USB/WinUSB 功能。`CellPort.slnx` 是唯一完整 solution，收录所有平台适配器、测试和工具；`CellPort.Mac.slnf` 提供 macOS 日常开发所需的过滤视图。迁移页面行为与验收状态见 [Avalonia 迁移矩阵](avalonia-migration.md)。
 
 | 项目 | 目标 | 职责 |
 | --- | --- | --- |
@@ -10,7 +10,7 @@
 | CellPort.Platform.Windows | net10.0-windows | WinUSB、SetupAPI、WMI/PnP、Windows 串口发现策略 |
 | CellPort.App | net10.0 / net10.0-windows | canonical Avalonia UI；Windows target 条件装配 WinUSB provider |
 | CellPort.Platform.MacOS | net10.0 | macOS libusb VID/PID 识别、AT USB 接口与 `/dev/cu.*` 串口回退，不引用 Windows 项目 |
-| Windows diagnostic tools | net10.0-windows | 独立排障工具，只收录于 `CellPort.Windows.sln` |
+| Windows diagnostic tools | net10.0-windows | Windows 专用排障工具，收录于统一的 `CellPort.slnx` |
 
 macOS 启动、打包与验证边界见 [macos.md](macos.md)。
 
@@ -32,7 +32,7 @@ dotnet build src/CellPort.Audio.Core/CellPort.Audio.Core.csproj -c Release
 dotnet build src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj -c Release
 ```
 
-Windows 另外构建 `CellPort.Windows.sln` 与 Windows target 发布，见 `.github/workflows/platform-checks.yml`。模拟通道测试验证连接顺序、失败释放、初始化命令、状态/连接事件、端口记忆以及大小写策略；原短信编码/导出、eSIM 编码、更新检测测试继续运行。架构测试禁止 Core 引用平台实现、System.Management/System.IO.Ports/WPF 或包含 P/Invoke。
+Windows 主机完整构建 `CellPort.slnx` 与 Windows target 发布，见 `.github/workflows/platform-checks.yml`。macOS/Linux 若需构建完整 solution，需传入 `-p:EnableWindowsTargeting=true`；macOS 日常构建可使用 `CellPort.Mac.slnf`。模拟通道测试验证连接顺序、失败释放、初始化命令、状态/连接事件、端口记忆以及大小写策略；原短信编码/导出、eSIM 编码、更新检测测试继续运行。架构测试禁止 Core 引用平台实现、System.Management/System.IO.Ports/WPF 或包含 P/Invoke。
 
 以下各节保留平台隔离与音频 change 当时的验证记录和设计文字。它们描述的是本次 Avalonia UI 迁移之前的代码状态，不应作为当前界面、solution 或打包结果。
 
@@ -42,7 +42,7 @@ Windows 另外构建 `CellPort.Windows.sln` 与 Windows target 发布，见 `.gi
 
 - 原始基线：在隔离的 `HEAD` 快照 `f8c5d158b1a7f0870dd7a08a3bcba50b06a74bef` 上运行 Core 测试，30/30 通过，0 失败、0 跳过。
 - 当前代码：`dotnet test tests/CellPort.Core.Tests/CellPort.Core.Tests.csproj -c Release --nologo`，40/40 通过；其中包含模拟通道回归和 Core 平台依赖检查。
-- 当前代码：`dotnet build src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj -c Release --nologo` 成功；`dotnet build CellPort.sln -c Release --nologo` 成功，0 警告、0 错误。
+- 当前代码：`dotnet build src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj -c Release --nologo` 成功；`dotnet build CellPort.slnx -c Release --nologo` 成功，0 警告、0 错误。
 - 迁移核对：SerialAtChannel、UsbAtChannel、ModuleScanner 与基线实现比较后仅有命名空间/导入调整和 Serial 文档描述更新；自动串口探测与端口探测代码在方法名归一化后逐行一致。
 - framework-dependent 和 self-contained 的 `win-x64` 发布均成功；两种输出都包含 `CellPort.Core.dll`、`CellPort.Platform.Windows.dll` 和 `CellPort.Transport.Serial.dll`。
 - `isolate-platform-dependencies` 与 `add-cross-platform-call-audio` 均通过严格 OpenSpec 校验。
@@ -53,7 +53,7 @@ Windows 另外构建 `CellPort.Windows.sln` 与 Windows target 发布，见 `.gi
 验证日期：2026-10-20；环境：Windows x64、.NET 10 SDK 10.0.401。
 
 - Core 测试：40/40 通过；Audio.Core 纯逻辑测试：4/4 通过。
-- `dotnet build CellPort.sln -c Release --nologo` 成功，0 警告、0 错误。
+- `dotnet build CellPort.slnx -c Release --nologo` 成功，0 警告、0 错误。
 - framework-dependent 与 self-contained 的 win-x64 发布均成功；两种输出都含 CellPort.Audio.Core.dll、CellPort.Core.dll、CellPort.Platform.Windows.dll 和 CellPort.Transport.Serial.dll。
 - Audio.Core 与测试项目均使用 net10.0。架构测试确认 Audio.Core 不引用 WPF、System.Management 或 System.IO.Ports。
 - Audio.Core 纯逻辑测试项目在 Windows 主机分别以 linux-x64 和 osx-x64 RID 成功构建。

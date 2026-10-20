@@ -13,12 +13,12 @@
 ./scripts/run-mac.sh --page settings
 ```
 
-以上脚本调用 `src/CellPort.App`。默认 solution 即便在 macOS 上也不需要 Windows targeting；Windows 诊断工具单独放在 `CellPort.Windows.sln`。验证入口：
+以上脚本调用 `src/CellPort.App`。统一的 `CellPort.slnx` 包含 Windows target 项目；在 macOS 上日常开发可用 `CellPort.Mac.slnf`，需要构建完整 solution 时传入 `EnableWindowsTargeting`。验证入口：
 
 ```bash
-dotnet build CellPort.sln -c Release
-dotnet test CellPort.sln --no-restore -v:minimal
-dotnet build CellPort.Windows.sln --no-restore -v:minimal
+dotnet build CellPort.Mac.slnf -c Release
+dotnet test CellPort.Mac.slnf --no-restore -v:minimal
+dotnet build CellPort.slnx -c Release -p:EnableWindowsTargeting=true
 ```
 
 ## 当前功能范围
@@ -63,10 +63,10 @@ App bundle 的可执行文件身份为 `CellPort`。本次最终 bundle 验证�
 ## 最终迁移验收记录
 
 - `src/CellPort.App` Release 构建：0 警告、0 错误。
-- 默认便携方案 `CellPort.sln` Release 构建：0 警告、0 错误；Windows 工具和诊断位于 `CellPort.Windows.sln`，在 macOS 上加 `-p:EnableWindowsTargeting=true` 跨目标构建同样为 0 警告、0 错误。
+- 迁移验收时的 `CellPort.slnx` Release 构建：0 警告、0 错误；当时 Windows 工具和诊断位于独立 solution，在 macOS 上加 `-p:EnableWindowsTargeting=true` 跨目标构建同样为 0 警告、0 错误。当前已合并为单一 `CellPort.slnx`，macOS 过滤视图仍由 `CellPort.Mac.slnf` 提供。
 - Windows x64 framework-dependent 与 self-contained 发布均成功，产物包含 `CellPort.exe` 及 Core、Audio、Platform.Windows、Transport.Serial 程序集。
 - 自动化测试：Core 89/89、Audio.Core 39/39、App 25/25、macOS 18/18、Linux 平台 6/6，共 177 项通过。
-- `CellPort.Windows.sln` 在 macOS 交叉构建通过，0 警告、0 错误。
+- Windows 工具和诊断在 macOS 交叉构建通过，0 警告、0 错误。
 - 最终 macOS `osx-arm64` `.app` 已检查签名、plist 和 libusb linkage，并实际连接 QDC507 读取状态。
 
 真实设备 AT、SIM 就绪、运营商、网络注册、制式与信号读取已验证；短信、USSD、电话簿、eSIM 写操作、Windows 上的实际运行和驱动行为、媒体/音频后端仍未验证。通话音频能力保持 control-only；本次迁移没有新增媒体后端。

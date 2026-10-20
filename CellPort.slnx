@@ -1,0 +1,30 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/CellPort.App/CellPort.App.csproj" />
+    <Project Path="src/CellPort.Audio.Core/CellPort.Audio.Core.csproj" />
+    <Project Path="src/CellPort.Core/CellPort.Core.csproj" />
+    <Project Path="src/CellPort.Platform.Linux/CellPort.Platform.Linux.csproj" />
+    <Project Path="src/CellPort.Platform.MacOS/CellPort.Platform.MacOS.csproj" />
+    <Project Path="src/CellPort.Platform.Windows/CellPort.Platform.Windows.csproj" />
+    <Project Path="src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CellPort.App.Tests/CellPort.App.Tests.csproj" />
+    <Project Path="tests/CellPort.Audio.Core.Tests/CellPort.Audio.Core.Tests.csproj" />
+    <Project Path="tests/CellPort.Core.Tests/CellPort.Core.Tests.csproj" />
+    <Project Path="tests/CellPort.Platform.Linux.Tests/CellPort.Platform.Linux.Tests.csproj" />
+    <Project Path="tests/CellPort.Platform.MacOS.Tests/CellPort.Platform.MacOS.Tests.csproj" />
+    <Project Path="tests/CellPort.Platform.Windows.Tests/CellPort.Platform.Windows.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/DiagTool/DiagTool.csproj" />
+    <Project Path="tools/E2E/E2E.csproj" />
+    <Project Path="tools/EsimProbe/EsimProbe.csproj" />
+    <Project Path="tools/PortProbe/PortProbe.csproj" />
+  </Folder>
+</Solution>

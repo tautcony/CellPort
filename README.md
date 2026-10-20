@@ -1,243 +1,83 @@
 # CellPort
 
-**[English](README.en.md) | 简体中文**
+**简体中文 | [English](README.en.md)**
 
-**A portable Avalonia manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile management · AT console.**
+CellPort 是面向大疆一代 4G 模块的 Avalonia 桌面管理应用，适用于 Windows 和 macOS。应用提供短信、通话控制、设备状态、eSIM / eUICC Profile 管理、AT 控制台及相关设置。
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![.NET](https://img.shields.io/badge/.NET-10.0%20Avalonia-512BD4)
 ![Release](https://img.shields.io/github/v/release/xmgzxmgz/CellPort)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-CellPort 是一款使用 **Avalonia** 的大疆一代 4G 模块管理器，提供 Windows 与 macOS 桌面入口：短信收发、语音通话控制、设备状态、**eSIM / eUICC Profile 管理**、AT 控制台、隐私和转发设置。六个页面共用一个 `CellPort.App`；macOS 通过 libusb VID/PID 匹配已知模块并连接 AT 接口，也可回退到系统串口；WinUSB 和驱动绑定仅在 Windows 提供。
+## 功能
 
-macOS `osx-arm64` 版本已在 QDC507 (`2CA3:4006`) 上通过接口 2 连接，并读取设备、SIM 和网络状态。短信、USSD、eSIM 写入、通话及媒体流程仍需分别验证。通话页面保留控制与状态显示；媒体通路仍按运行时能力显示为不可用（仅控制）。
+- **设备状态**：连接管理；显示模块、固件、SIM、运营商、网络、信号及接口信息。
+- **短信**：收发短信、长短信拼接、会话管理和 CSV / JSON 导出；可选短信转发。
+- **通话**：拨号、接听、挂断、DTMF、静音和通话记录。
+- **eSIM / eUICC**：读取 EID 和 Profile 信息；启用、停用、删除 Profile 和修改昵称。
+- **USSD 与电话簿**：查询 USSD 服务并读取 SIM 联系人。
+- **设置**：主题、运行日志、更新检查和短信转发服务配置。
+- **AT 控制台**：执行 AT 指令并查看指令历史。
 
-> 硬件为大疆 4G 模块一代（实为 Quectel EG25-G / MDM9607 内核），
-> 理论上兼容所有 EG25-G / EC25 系列模组。
+## 硬件与平台
 
-**📥 免构建下载**：前往 [Releases](https://github.com/xmgzxmgz/CellPort/releases/latest) 按需选择：
+CellPort 面向基于 Quectel EG25-G 的大疆一代 4G 模块，适用型号包括 Baiwang QDC507。已知 USB 标识包括 `2CA3:4006`（QDC507）和 `2C7C:0125`（Quectel EG25-G）。
 
-| 包 | 适用场景 |
+| 平台 | 连接方式 |
 |---|---|
-| `CellPort-v*-win-x64.zip`（约 0.4 MB） | 已装 [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)，体积小 |
-| `CellPort-v*-win-x64-selfcontained.zip`（约 60 MB） | 免装运行时，解压即用 |
+| Windows | WinUSB、系统串口 |
+| macOS | libusb USB 直连、系统串口回退 |
 
-解压运行 `CellPort.exe` 即可。
+## 下载
 
-![eSIM 页面截图（已脱敏）](docs/screenshot-esim.png)
+前往 [GitHub Releases](https://github.com/xmgzxmgz/CellPort/releases/latest) 获取 Windows x64 版本：
 
-## 功能特性
-
-- **短信**：接收（`+CMTI` / `+CMT` 主动上报）、发送（PDU 模式）、长短信（UDH 8/16-bit）自动拼接、
-  UCS2 中文、GSM 7-bit 打包、会话式双栏界面
-- **语音通话**：拨号、接听、挂断、DTMF、静音、通话记录
-- **设备状态**：型号、固件、运营商、信号（RSSI / dBm / %）、网络制式、SIM 状态、
-  IMEI / ICCID / IMSI / 本机号码、注册状态、数据附着、USB 模式与平台接口诊断
-- **eSIM / eUICC**（本项目的核心）：
-  - 逻辑通道读取：EID（双路径）+ Profile 列表（ICCID / 运营商 / ISD-P AID / 状态 / 类别）
-  - **Profile 启用 / 停用切卡**（真机验证通过），写入后引导重启模块并自动重连
-  - **Profile 删除**（`BF33`）与**昵称修改**（`BF29`，按 ICCID 定位，≤64 ASCII 字符），编码与 lpac 逐字节一致
-- **USSD 查询**：`AT+CUSD` 封装，GSM7 打包 / UCS2 自动解码，支持链式响应提示
-- **SIM 电话簿**：读取 SM 存储容量与联系人列表，中文姓名（UCS2）自动解码，点击号码复制
-- **短信导出**：会话一键导出 CSV（Excel 友好，带 BOM）/ JSON
-- **运行日志**：`%LOCALAPPDATA%\CellPort\logs` 自动滚动，保留 7 天，含全局异常兜底
-- **更新检查**：设置页一键检查 GitHub Release 新版本
-- **AT 控制台**：任意指令执行、历史翻阅、快捷指令
-- **连接策略**：串口自动探测 + 端口缓存 + 蓝牙虚拟口剔除，冷启动 ~600ms、热启动 ~60ms
-- **质量保障**：Core 层单元测试 30 例（GSM7 标准向量、ES10c 报文逐字节、BCD、导出转义），GitHub Actions 自动发布
-- 深 / 浅 / 跟随系统主题；短信转发到 Bark / 飞书 / 钉钉
-
-## 硬件背景（已实测确认）
-
-| 项目 | 值 |
-| --- | --- |
-| 模组型号 | Baiwang **QDC507** |
-| 模组内核 | Quectel **EG25-G**（Qualcomm MDM9607，Linux 3.18.44 ARMv7） |
-| USB VID:PID（大疆原厂定制） | `2ca3:4006` |
-| USB VID:PID（移远标准） | `2c7c:0125` |
-| 本机实测固件 | `QDC507GLEFM21` |
-
-## 关键结论：这个模块读不了 eUICC？——用对通道就行
-
-开发初期曾得出「QDC507 固件的 `AT+CSIM` 透传有 ~8 字节 APDU 长度上限，
-因此物理上无法进入 ISD-R」的结论 —— **这个结论是错的**。CSIM 的长度限制属实：
-
-| APDU | 长度 | 结果 |
-|---|---|---|
-| `00A40000023F00`（SELECT MF） | 7 字节 / 14 字符 | `9000` 成功 |
-| 同上补 1 字节 | 8 字节 / 16 字符 | `612E`（指令已执行） |
-| 同上补 2 字节 | 9 字节 / 18 字符 | **无任何响应** |
-| `00A4040000` + 16 字节 AID | 21 字节 / 42 字符 | **无任何响应** |
-
-但 SELECT ISD-R 本来就不该走 CSIM —— CellDock 内嵌的 [lpac](https://github.com/estkme-group/lpac)
-走的是 **3GPP TS 27.007 逻辑通道指令**，完全绕开这条限制：
-
-1. `AT+CCHO="<ISD-R AID>"` —— **模块固件内部完成 ISD-R 选择**，返回 `+CCHO: <通道号>`；
-2. `AT+CGLA=<ch>,<len>,"<hex>"` —— 在该通道上透传 APDU，与 eUICC 的 ES10x 交互；
-3. `AT+CCHC=<ch>` —— 关闭通道。
-
-QDC507 固件（`QDC507GLEFM21_01.001.02.001`）对这三条指令**全部支持**。
-本项目据此实现了完整的 ES10c 客户端：
-
-- **STORE DATA 分帧**（与 lpac `es10x_transmit_iter` 对齐）：CLA=`0x80|ch`、INS=`0xE2`、
-  P1=`0x11`（中间块）/ `0x91`（末块）、P2=块序号，单块上限 120 字节；
-  `61xx` 时以 `80 C0 00 00 <sw2>`（GET RESPONSE）循环取数。
-- **GetProfilesInfo**（`BF2D 00`）：响应按 `BF2D → A0 → E3` 逐层解析
-  （`5A` ICCID / `4F` ISD-P AID / `9F70` 状态 / `90` 昵称 / `91` 运营商 / `92` Profile 名 / `95` 类别）。
-- **GetEid**：先 SGP.22 `BF3E 02 5C 01 5A`，失败回退 SGP.02 `GET DATA (0x80|ch) CA 9F 7F 00`。
-
-实测（9eSIM 可写 eUICC 实体卡）：**7 个 Profile 全部可读**
-（clubsim / giffgaff / Vodafone DE / Top_Connect / Lifecell / ChinaTelecom Macau / WEBBING，含 ICCID 与状态）。
-
-## eSIM 切卡：ES10c EnableProfile / DisableProfile
-
-切换走 `BF31`（启用）/ `BF32`（停用），请求编码与 lpac `es10c.c` 逐字节一致：
-
-```
-BF31 <len> A0 <len> 4F <len> <ISD-P AID> 81 01 00     ← refreshFlag = FALSE
-响应： BF31 <len> 80 01 <code>                          ← 0 = 成功
-```
-
-真机实测（9eSIM）：
-
-- 启用未启用的 Profile → `Code=0 成功`，eUICC **自动停用**当前已启用的 Profile（单激活卡）；
-- 恢复启用原 Profile → `Code=0 成功`；
-- 对「已停用」的 Profile 再发停用 → `Code=2`（invalidProfile，该卡的正常语义）。
-
-**生效条件**：写入 eUICC 后 modem 的 SIM 会话不会自动刷新 —— 需要 `AT+CFUN=1,1` 重启模块
-（约 40 秒）。程序会在写入成功后询问，确认后自动重启、等待端口恢复、重连并重新读取 Profile 列表。
-
-## 连接策略
-
-在已测试的 Windows QDC507 设备上，系统暴露 6 个串口（COM4~COM9），其中 AT 口在 COM6/COM7 之间漂移，
-COM8/COM9 是蓝牙虚拟口（`BTHENUM`，应剔除）。本项目的连接流水线：
-
-| 场景 | 耗时 | 说明 |
-|---|---|---|
-| 冷启动（无缓存） | ~600ms | 两段式：已知端口先试 → 未命中才全量并行 |
-| 热启动（端口缓存） | ~60ms | 上次成功端口持久化在 `%APPDATA%\CellPort\settings.json` |
-
-失败排查日志写入 `%APPDATA%\CellPort\last-connect.log`（`[1/5]~[5/5]` 全过程）。
+- Framework-dependent ZIP：需要安装 .NET 10 Runtime。
+- Self-contained ZIP：包含 .NET Runtime。
+- Windows 安装程序。
 
 ## 构建与运行
 
-### macOS
-
-安装 .NET 10 SDK 后，在项目根目录运行：
-
-```bash
-./scripts/run-mac.sh
-```
-
-没有接入模块时也能正常打开窗口。macOS 通过 libusb 直连已知模块，串口回退使用 `/dev/cu.*`；不载入 Windows WMI 或 WinUSB 实现。
-
-```bash
-# 从同一 Avalonia 应用运行；支持 --page sms/calls/device/esim/console/settings
-./scripts/run-mac.sh --page device
-
-# 默认便携 solution；Windows 专用诊断 solution
-dotnet build CellPort.sln -c Release
-dotnet build CellPort.Windows.sln -c Release
-
-# 打包本机架构的 self-contained .app
-./scripts/publish-mac.sh
-open dist/osx-arm64/CellPort.app
-```
-
-`CellPort.sln` 是日常便携入口，包含 canonical `CellPort.App`；Windows 专用诊断工具位于 `CellPort.Windows.sln`。macOS 使用 libusb 直连与 `/dev/cu.*` 串口回退，不载入 Windows WMI 或 WinUSB 实现。运行和验证边界见 [macOS 运行说明](docs/macos.md)。
+需要 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)。
 
 ### Windows
 
-需求：Windows 10+、[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)、
-Quectel USB 驱动（插上模块 Windows 一般自带）。
-
-```bash
+```powershell
 git clone https://github.com/xmgzxmgz/CellPort.git
 cd CellPort
-dotnet build CellPort.sln -c Release
+dotnet build CellPort.slnx -c Release
 dotnet run --project src/CellPort.App -f net10.0-windows -- --page device
 ```
 
-或在 Windows 上用 `dotnet publish src/CellPort.App -f net10.0-windows -c Release -o dist` 后运行 `dist\CellPort.exe`。
+Windows USB 直连使用 WinUSB；串口连接使用 Quectel 驱动提供的系统串口。
 
-> 提示：直接双击启动会触发自动连接；`CellPort.exe --page esim` 可直接打开指定页面
-> （sms / calls / device / esim / console / settings）。
+### macOS
 
-## 项目结构
-
-```
-CellPort/
-├── CellPort.sln               # portable default solution
-├── CellPort.Windows.sln       # Windows-only diagnostic projects
-├── src/
-│   ├── CellPort.Core/          # 核心库（无 UI 依赖）
-│   │   ├── At/                 #   AT 引擎、SMS PDU 编解码
-│   │   ├── Transport/          #   串口通道、模块识别（USB VID/PID）
-│   │   ├── Models/             #   设备状态 / Profile 模型
-│   │   └── Services/           #   ModemManager / DeviceInfo / Sms / Call
-│   │                           #   LogicalChannelEs10 (CCHO/CGLA + ES10c) / BerTlv
-│   │                           #   Cusd / Phonebook / SmsExport / AppLog / UpdateCheck
-│   ├── CellPort.App/           # canonical Avalonia 应用（六页面）
-│   ├── CellPort.Platform.Windows/ # Windows USB/诊断
-│   └── CellPort.Platform.MacOS/   # macOS USB AT 与串口实现
-├── tests/
-│   ├── CellPort.Core.Tests/    # Core 协议与业务测试
-│   └── CellPort.App.Tests/     # Avalonia headless 页面测试
-├── tools/
-│   ├── PortProbe/              # 串口枚举 + AT 探测（排障用）
-│   ├── EsimProbe/              # eUICC 全链路验证（读取 + 切卡回环测试）
-│   ├── DiagTool/               # 连接诊断
-│   └── E2E/                    # 端到端真机测试
-├── scripts/
-│   ├── publish.ps1             # Windows framework/self-contained 发布
-│   ├── run-mac.sh              # canonical Avalonia 应用启动
-│   └── publish-mac.sh          # self-contained macOS .app
-├── .github/workflows/          # push tag 自动测试 + 构建 + 发布 Release
-└── docs/                       # 迁移矩阵、平台边界和脱敏截图
+```bash
+./scripts/run-mac.sh --page device
+dotnet build CellPort.slnx -c Release -p:EnableWindowsTargeting=true
 ```
 
-## 已知限制
+创建本机架构的 self-contained `.app`：
 
-- **EID**：SGP.22 `BF3E` 与 SGP.02 `GET DATA 9F7F` 两条路径在 9eSIM 这类早期规范卡上
-  均被 ISD-R 拒绝（`6A80` / `6D00`）—— 是卡片不提供，不是模块问题；
-  CellDock 在此类卡上同样读不到。Profile 管理不受影响。
-- **Profile 删除（`BF33`）与昵称修改（`BF29`）已实现**（v1.0.1），请求编码与 lpac `es10c.c` 对齐：
-  - 删除：`BF33 <len> 4F <len> <AID>`（无 A0 包装、无 refreshFlag —— 与 lpac `refreshFlag & 0x80` 判定一致）
-  - 昵称：`BF29 <len> 5A 0A <ICCID BCD> 90 <len> <ASCII>`（按 ICCID 定位，非 AID）
-- 切卡后必须重启模块（或重新上电）新卡才生效 —— modem 侧限制，程序已做引导与自动重连。
-- 数据网卡（MI_04，ECM）拨号由 Windows 处理，程序不介入。
+```bash
+brew install libusb
+./scripts/publish-mac.sh
+```
 
-## 路线图
+产物位于 `dist/osx-arm64/CellPort.app` 或 `dist/osx-x64/CellPort.app`，具体取决于目标架构。
 
-| 项 | 状态 | 说明 |
-|---|---|---|
-| Profile 删除 / 昵称修改 | ✅ v1.0.1 | ES10c `BF33` / `BF29` |
-| USSD / 电话簿 / 短信导出 | ✅ v1.0.1 | |
-| 运行日志 / 更新检查 | ✅ v1.0.1 | |
-| **Profile 下载（ES10b + SM-DP+）** | ⏸ 暂缓 | 需要真实 SM-DP+ 服务器联调才能验证协议实现；在仅有本地测试环境（无可用的 LPA 激活码）的情况下，贸然实现并宣称支持是不负责任的 —— 待拿到可联调的运营商/测试 SM-DP+ 后再落地 |
+指定应用启动页面：
 
-## FAQ
+```text
+CellPort.exe --page <sms|calls|device|esim|console|settings>
+```
 
-**Q: 启动后左下角显示「未自动连接」？**
-不是模块故障。程序会先复用上次成功端口（热启动 ~60ms），失败再全量探测；
-查看 `%APPDATA%\CellPort\last-connect.log` 定位，或手动点「连接模块」。
+## 文档
 
-**Q: EID 一栏显示「此卡未提供（ISD-R 不支持读取）」？**
-EID 与 Profile 是两条独立读取路径；该提示仅表示 EID 不可读（常见于 SGP.02 早期卡），
-Profile 列表与切卡功能不受影响。
-
-**Q: 支持其他模块吗？**
-任何基于 EG25-G / EC25 且固件支持 `AT+CCHO` / `AT+CGLA` 的设备理论上均可；
-可用 AT 控制台执行 `AT+CCHO=?` 验证。
-
-## 致谢
-
-- [CellDock for Mac](https://github.com/celldock/celldock-for-mac) —— 本项目的功能蓝本与思路来源
-- [lpac](https://github.com/estkme-group/lpac) —— eUICC 协议实现参考（ES10x / BER-TLV）
+- [macOS 运行说明](docs/macos.md)
+- [第三方依赖许可](THIRD-PARTY-NOTICES.md)
 
 ## License
 
 [MIT](LICENSE)
-
-第三方依赖许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

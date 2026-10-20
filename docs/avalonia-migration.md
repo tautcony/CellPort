@@ -1,6 +1,6 @@
 # Avalonia migration and verification matrix
 
-`CellPort.App` is the canonical Avalonia 12.1.4 desktop app for Windows and macOS; the former temporary `CellPort.Desktop` host is retired. `CellPort.sln` is the portable default solution; `CellPort.Windows.sln` contains Windows-only diagnostics and tools. macOS platform composition matches known module VID/PID with IOKit location and opens the libusb AT interface, with `/dev/cu.*` serial fallback. Windows retains module scanning, WinUSB and driver setup. The macOS scripts launch and publish the canonical `CellPort` executable in `CellPort.app`.
+`CellPort.App` is the canonical Avalonia 12.1.4 desktop app for Windows and macOS; the former temporary `CellPort.Desktop` host is retired. `CellPort.slnx` is the unified solution for all platform adapters, tests, and tools. `CellPort.Mac.slnf` provides a Mac-focused filtered view; non-Windows hosts need `EnableWindowsTargeting` to build the full solution. macOS platform composition matches known module VID/PID with IOKit location and opens the libusb AT interface, with `/dev/cu.*` serial fallback. Windows retains module scanning, WinUSB and driver setup. The macOS scripts launch and publish the canonical `CellPort` executable in `CellPort.app`.
 
 This matrix records the migrated workflows and automated verification. Headless and fake-channel tests verify UI wiring and disconnected states. A QDC507 was also connected on macOS through USB interface 2 and its modem/SIM/network status was read. eSIM profile writes, SMS/call workflows, other carriers, Windows runtime and audio-backend behavior remain unverified.
 
@@ -22,16 +22,16 @@ The call UI keeps the existing audio availability evaluator and `CallAudioUiSnap
 Final build, publish and connected-device checks completed on macOS:
 
 - Canonical app (`src/CellPort.App`) Release build: 0 warnings, 0 errors.
-- Portable default solution (`CellPort.sln`) Release build: 0 warnings, 0 errors.
-- Windows solution (`CellPort.Windows.sln`) cross-targeted from macOS with `-p:EnableWindowsTargeting=true`: 0 warnings, 0 errors.
+- Unified solution (`CellPort.slnx`) Release build: 0 warnings, 0 errors.
+- Windows platform projects and tools cross-targeted from macOS with `-p:EnableWindowsTargeting=true`: 0 warnings, 0 errors; these projects now live in the unified `CellPort.slnx`.
 - Windows x64 framework-dependent and self-contained `dotnet publish` runs both succeeded. Each output contains `CellPort.exe` and the Core, Audio, Platform.Windows, and Transport.Serial assemblies.
 - The self-contained `osx-arm64` `CellPort.app` passed code-signature and plist checks, launched, matched `2CA3:4006`, claimed interface 2, completed an AT probe and read QDC507, SIM-ready, operator, network and signal status.
 
 Validation commands:
 
 ```bash
-dotnet test CellPort.sln --no-restore -v:minimal
-dotnet build CellPort.Windows.sln --no-restore -v:minimal
+dotnet test CellPort.Mac.slnf --no-restore -v:minimal
+dotnet build CellPort.slnx --no-restore -p:EnableWindowsTargeting=true -v:minimal
 ./scripts/publish-mac.sh osx-arm64
 ```
 

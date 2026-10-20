@@ -22,8 +22,8 @@ jobs:
           dotnet-version: 10.0.x
       - name: Test portable core (no hardware)
         run: dotnet test tests/CellPort.Core.Tests/CellPort.Core.Tests.csproj -c Release --nologo
-      - name: Build portable canonical app
-        run: dotnet build CellPort.sln -c Release --nologo
+      - name: Build unified solution
+        run: dotnet build CellPort.slnx -c Release -p:EnableWindowsTargeting=true --nologo
       - name: Test headless app workflows
         run: dotnet test tests/CellPort.App.Tests/CellPort.App.Tests.csproj -c Release --nologo
       - name: Test portable audio contracts (no hardware)
@@ -67,7 +67,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Build Windows hosts, tools, and diagnostics
-        run: dotnet build CellPort.Windows.sln -c Release --nologo
+        run: dotnet build CellPort.slnx -c Release --nologo
       - name: Publish framework-dependent
         run: dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained false -o dist/platform-check/framework-dependent
       - name: Publish self-contained
