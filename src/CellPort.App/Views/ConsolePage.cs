@@ -11,7 +11,7 @@ namespace CellPort.App.Views;
 public sealed class ConsolePage : UserControl, IModuleAware, IDisposable, IAsyncDisposable
 {
     private static readonly string[] QuickCommands = ["AT", "ATI", "AT+CGMM", "AT+CGMR", "AT+CGSN", "AT+CPIN?", "AT+CSQ", "AT+COPS?", "AT+CREG?", "AT+QNWINFO", "AT+CGATT?", "AT+QCCID", "AT+CIMI", "AT+CNUM", "AT+CMGF?", "AT+CPMS?", "AT+QCFG=\"usbnet\"", "AT+QCFG=\"usbcfg\"", "AT+CFUN?", "AT+QENG=\"servingcell\""];
-    private readonly TextBox _output = new() { Name = "OutputText", IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("monospace"), MinHeight = 260 };
+    private readonly TextBox _output = new() { Name = "OutputText", IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("monospace"), MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
     private readonly TextBox _command = new() { Name = "CommandBox", FontFamily = new FontFamily("monospace"), PlaceholderText = "输入 AT 指令" };
     private readonly Button _run = new() { Name = "RunButton", Content = "执行", IsEnabled = false };
     private readonly StringBuilder _log = new();
@@ -25,7 +25,7 @@ public sealed class ConsolePage : UserControl, IModuleAware, IDisposable, IAsync
 
     public ConsolePage()
     {
-        var quick = new WrapPanel { Orientation = Orientation.Horizontal };
+        var quick = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 6, LineSpacing = 6 };
         foreach (var cmd in QuickCommands)
         {
             var button = new Button { Content = cmd, Margin = new Avalonia.Thickness(2), Padding = new Avalonia.Thickness(8, 4) };
@@ -33,8 +33,19 @@ public sealed class ConsolePage : UserControl, IModuleAware, IDisposable, IAsync
             quick.Children.Add(button);
         }
         var layout = new Grid { RowDefinitions = new RowDefinitions("*,Auto,Auto"), Margin = new Avalonia.Thickness(16), RowSpacing = 8 };
-        Grid.SetRow(_output, 0); layout.Children.Add(new Border { Classes = { "app-card" }, Padding = new Avalonia.Thickness(12), Child = new ScrollViewer { Content = _output } });
-        Grid.SetRow(quick, 1); layout.Children.Add(new ScrollViewer { Content = quick, MaxHeight = 104, Margin = new Avalonia.Thickness(0, 8) });
+        var outputCard = new Border { Classes = { "app-card" }, Padding = new Avalonia.Thickness(12), Child = _output };
+        Grid.SetRow(outputCard, 0);
+        layout.Children.Add(outputCard);
+        var quickScroller = new ScrollViewer
+        {
+            Content = quick,
+            MaxHeight = 144,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+        var quickCard = new Border { Classes = { "app-card" }, Padding = new Avalonia.Thickness(8), Child = quickScroller };
+        Grid.SetRow(quickCard, 1);
+        layout.Children.Add(quickCard);
         var inputRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         inputRow.Children.Add(_command); Grid.SetColumn(_run, 1); inputRow.Children.Add(_run);
         Grid.SetRow(inputRow, 2); layout.Children.Add(inputRow); Content = layout;

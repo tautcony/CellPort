@@ -9,39 +9,35 @@ namespace CellPort.Core.Tests;
 /// </summary>
 public class Es10RequestEncodingTests
 {
-    private const string Aid = "A0000005591010FFFFFFFF8900000100";
-
-    private static readonly byte[] AidBytes =
-    [
-        0xA0, 0x00, 0x00, 0x05, 0x59, 0x10, 0x10, 0xFF,
-        0xFF, 0xFF, 0xFF, 0x89, 0x00, 0x00, 0x01, 0x00,
-    ];
+    private const string Iccid = "8986011234567890123";
 
     [Fact]
-    public void EnableProfile_MatchesLpacEncoding()
+    public void EnableProfile_UsesIccidAndRefreshTrue()
     {
-        // BF31 <len> A0 <len> 4F 10 <aid16> 81 01 00
-        var req = LogicalChannelEs10.BuildProfileStateRequest(enable: true, Aid);
+        // BF31 <len> A0 <len> 5A 0A <ICCID BCD> 81 01 FF
+        var req = LogicalChannelEs10.BuildProfileStateRequest(enable: true, Iccid);
 
         Assert.Equal(0xBF, req[0]);
         Assert.Equal(0x31, req[1]);
-        Assert.Equal(0x17, req[2]);   // 总内容 = A0 TLV(2+21) = 23
+        Assert.Equal(0x11, req[2]);   // A0 TLV 总长 = 17
         Assert.Equal(0xA0, req[3]);
-        Assert.Equal(0x15, req[4]);   // A0 内容 = 4F TLV(18) + 3 = 21
-        Assert.Equal(0x4F, req[5]);   // tag ISD-P AID
-        Assert.Equal(0x10, req[6]);   // AID 长度 16
-        Assert.Equal(AidBytes, req[7..23]);
-        Assert.Equal(new byte[] { 0x81, 0x01, 0x00 }, req[23..]); // refreshFlag = FALSE
-        Assert.Equal(26, req.Length);
+        Assert.Equal(0x0F, req[4]);   // 5A TLV(12) + 81 TLV(3)
+        Assert.Equal(0x5A, req[5]);   // ICCID identifier
+        Assert.Equal(0x0A, req[6]);
+        Assert.Equal(
+            new byte[] { 0x98, 0x68, 0x10, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0xF3 },
+            req[7..17]);
+        Assert.Equal(new byte[] { 0x81, 0x01, 0xFF }, req[17..]); // refreshFlag = TRUE
+        Assert.Equal(20, req.Length);
     }
 
     [Fact]
     public void DisableProfile_UsesBf32()
     {
-        var req = LogicalChannelEs10.BuildProfileStateRequest(enable: false, Aid);
+        var req = LogicalChannelEs10.BuildProfileStateRequest(enable: false, Iccid);
         Assert.Equal(0x32, req[1]);
-        // 其余结构与 enable 完全一致
-        var en = LogicalChannelEs10.BuildProfileStateRequest(enable: true, Aid);
+        // refresh=true 与 EnableProfile 一致
+        var en = LogicalChannelEs10.BuildProfileStateRequest(enable: true, Iccid);
         for (var i = 0; i < req.Length; i++)
         {
             if (i == 1)
@@ -56,16 +52,16 @@ public class Es10RequestEncodingTests
     [Fact]
     public void DeleteProfile_NoA0Wrapper_NoRefreshFlag()
     {
-        // BF33 <len> 4F 10 <aid16> —— lpac delete 以 refreshFlag=0 走「无包装」分支
-        var req = LogicalChannelEs10.BuildDeleteProfileRequest(Aid);
+        // BF33 <len> 5A 0A <ICCID BCD> —— DeleteProfile 不带 refresh flag
+        var req = LogicalChannelEs10.BuildDeleteProfileRequest(Iccid);
 
         Assert.Equal(0xBF, req[0]);
         Assert.Equal(0x33, req[1]);
-        Assert.Equal(0x12, req[2]);   // 内容 = 4F TLV = 2 + 16 = 18
-        Assert.Equal(0x4F, req[3]);
-        Assert.Equal(0x10, req[4]);
-        Assert.Equal(AidBytes, req[5..]);
-        Assert.Equal(21, req.Length); // 无 81 01 00 尾巴
+        Assert.Equal(0x0C, req[2]);   // 内容 = 5A TLV = 2 + 10
+        Assert.Equal(0x5A, req[3]);
+        Assert.Equal(0x0A, req[4]);
+        Assert.Equal(10, req.Length - 5);
+        Assert.Equal(15, req.Length);
     }
 
     [Fact]
@@ -80,6 +76,39 @@ public class Es10RequestEncodingTests
         Assert.Equal(0x5A, req[3]);
         Assert.Equal(0x0A, req[4]);
         Assert.Equal(10, req.Length - 5);
+    }
+
+    [Fact]
+    public void ListNotifications_UsesBf28AndDeleteEventFilter()
+    {
+        Assert.Equal(new byte[] { 0xBF, 0x28, 0x00 }, LogicalChannelEs10.BuildListNotificationsRequest());
+        Assert.Equal(
+            new byte[] { 0xBF, 0x28, 0x04, 0x81, 0x02, 0x04, 0x10 },
+            LogicalChannelEs10.BuildListNotificationsRequest(eventId: 3));
+    }
+
+    [Fact]
+    public void RetrieveNotification_UsesSequenceSearchCriteria()
+    {
+        Assert.Equal(
+            new byte[] { 0xBF, 0x2B, 0x05, 0xA0, 0x03, 0x80, 0x01, 0x01 },
+            LogicalChannelEs10.BuildRetrieveNotificationRequest(1));
+    }
+
+    [Fact]
+    public void GetProfilesInfoRequestsDjOneHubBasicProfileTags()
+    {
+        Assert.Equal(
+            new byte[] { 0xBF, 0x2D, 0x09, 0x5C, 0x07, 0x5A, 0x9F, 0x70, 0x90, 0x91, 0x92, 0x95 },
+            LogicalChannelEs10.BuildProfileListRequest());
+    }
+
+    [Fact]
+    public void ProfileTextDecodesUtf8WithoutLoss()
+    {
+        var encoded = System.Text.Encoding.UTF8.GetBytes("旅行卡");
+
+        Assert.Equal("旅行卡", LogicalChannelEs10.DecodeProfileText(encoded));
     }
 
     [Fact]
@@ -98,15 +127,15 @@ public class Es10RequestEncodingTests
         Assert.Equal(
             new byte[] { 0x98, 0x68, 0x10, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0xF3 },
             req[5..15]);
-        Assert.Equal(0x90, req[15]);  // nickname tag
+        Assert.Equal(0x90, req[15]);  // ContextSpecific(16) nickname tag
         Assert.Equal(0x08, req[16]);  // nickname 长度
-        Assert.Equal("CellPort", System.Text.Encoding.ASCII.GetString(req[17..]));
+        Assert.Equal("CellPort", System.Text.Encoding.UTF8.GetString(req[17..]));
     }
 
     [Fact]
     public void SetNickname_EmptyNickname_EncodesLen0()
     {
-        // 90 00 —— SGP.22 ProfileNickname SIZE(0..64)，空即清除
+        // 90 00 —— 长度 0 即清除昵称
         var req = LogicalChannelEs10.BuildNicknameRequest("8986011234567890123", string.Empty);
 
         Assert.Equal(0x90, req[15]);
@@ -116,12 +145,14 @@ public class Es10RequestEncodingTests
     }
 
     [Fact]
-    public void SetNickname_RejectsNonAsciiAndLongNames()
+    public void SetNickname_RejectsNamesLongerThan64Utf8Bytes()
     {
         Assert.Throws<ArgumentException>(
-            () => LogicalChannelEs10.BuildNicknameRequest("8986011234567890123", "中文"));
-        Assert.Throws<ArgumentException>(
             () => LogicalChannelEs10.BuildNicknameRequest("8986011234567890123", new string('a', 65)));
+        Assert.Throws<ArgumentException>(
+            () => LogicalChannelEs10.BuildNicknameRequest("8986011234567890123", new string('中', 22)));
+        Assert.Throws<ArgumentException>(
+            () => LogicalChannelEs10.BuildNicknameRequest("8986011234567890123", "\uD800"));
         Assert.Throws<ArgumentException>(
             () => LogicalChannelEs10.BuildNicknameRequest("12345", "ok")); // ICCID 太短
     }

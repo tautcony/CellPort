@@ -10,6 +10,7 @@ public sealed class SmsService(AtEngine engine)
 {
     private readonly AtEngine _engine = engine;
     private readonly List<SmsMessage> _inbox = [];
+    private readonly Dictionary<int, SmsMessage> _storedMessagesByIndex = [];
     private readonly Dictionary<(string Number, int Ref), List<SmsMessage>> _pendingConcat = [];
     private readonly object _lock = new();
 
@@ -38,7 +39,7 @@ public sealed class SmsService(AtEngine engine)
     {
         // 使用 PDU 模式以便完整解码中文与长短信。
         await SafeAsync("AT+CMGF=0", ct).ConfigureAwait(false);
-        // 新短信直接上报（+CMT），无需频繁轮询。
+        // 新短信到达时上报 SIM 存储索引（+CMTI）。
         await SafeAsync("AT+CNMI=2,1,0,0,0", ct).ConfigureAwait(false);
         // 选择 SIM 卡存储。
         await SafeAsync("AT+CPMS=\"SM\",\"SM\",\"SM\"", ct).ConfigureAwait(false);
@@ -101,10 +102,16 @@ public sealed class SmsService(AtEngine engine)
     }
 
     /// <summary>
-    /// 处理一条主动上报的 +CMT 行（新短信到达）。
+    /// 处理一条短信主动上报。
     /// </summary>
     public bool HandleUnsolicited(string line)
     {
+        if (line.StartsWith("+CMTI:", StringComparison.OrdinalIgnoreCase))
+        {
+            ReadStoredIndexFromNotification(line);
+            return true;
+        }
+
         if (!line.StartsWith("+CMT:", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -123,22 +130,15 @@ public sealed class SmsService(AtEngine engine)
     /// </summary>
     public SmsMessage? FeedLine(string line)
     {
-        if (line.StartsWith("+CMT:", StringComparison.OrdinalIgnoreCase) ||
-            line.StartsWith("+CMTI:", StringComparison.OrdinalIgnoreCase))
+        if (line.StartsWith("+CMTI:", StringComparison.OrdinalIgnoreCase))
         {
-            _lastCmtHeader = line;
+            ReadStoredIndexFromNotification(line);
             return null;
         }
 
-        // +CMTI: "SM",<index> —— 有新短信存入，需要去读
-        if (_lastCmtHeader?.StartsWith("+CMTI:", StringComparison.OrdinalIgnoreCase) == true)
+        if (line.StartsWith("+CMT:", StringComparison.OrdinalIgnoreCase))
         {
-            var m = Regex.Match(_lastCmtHeader, @"(\d+)\s*$");
-            _lastCmtHeader = null;
-            if (m.Success)
-            {
-                _ = ReadByIndexAsync(int.Parse(m.Groups[1].Value));
-            }
+            _lastCmtHeader = line;
             return null;
         }
 
@@ -157,6 +157,16 @@ public sealed class SmsService(AtEngine engine)
         }
 
         return null;
+    }
+
+    private void ReadStoredIndexFromNotification(string line)
+    {
+        var match = Regex.Match(line, @"\+CMTI:\s*""[^""]*""\s*,\s*(\d+)\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var index))
+        {
+            _ = ReadByIndexAsync(index);
+        }
     }
 
     private async Task ReadByIndexAsync(int index)
@@ -275,15 +285,29 @@ public sealed class SmsService(AtEngine engine)
     {
         lock (_lock)
         {
+            if (msg.Index >= 0)
+            {
+                if (_storedMessagesByIndex.TryGetValue(msg.Index, out var stored))
+                {
+                    if (SameStoredRecord(stored, msg))
+                    {
+                        return false;
+                    }
+
+                    // SIM slots can be reused after a message is deleted externally.
+                    _inbox.RemoveAll(existing => existing.Index == msg.Index);
+                }
+
+                _storedMessagesByIndex[msg.Index] = msg;
+            }
+
+            if (_inbox.Any(existing => SameMessage(existing, msg)))
+            {
+                return false;
+            }
+
             if (!msg.IsConcatPart)
             {
-                // 普通短信：按 号码+正文+时间 去重
-                if (_inbox.Any(m => m.Number == msg.Number && m.Body == msg.Body &&
-                                    m.Timestamp.HasValue && msg.Timestamp.HasValue &&
-                                    Math.Abs((m.Timestamp.Value - msg.Timestamp.Value).TotalMinutes) < 1))
-                {
-                    return false;
-                }
                 _inbox.Add(msg);
                 return true;
             }
@@ -327,6 +351,30 @@ public sealed class SmsService(AtEngine engine)
             _inbox.Add(merged);
             return true;
         }
+    }
+
+    private static bool SameStoredRecord(SmsMessage left, SmsMessage right) =>
+        left.Number == right.Number && left.Body == right.Body && left.Direction == right.Direction &&
+        left.Timestamp == right.Timestamp && left.ConcatReference == right.ConcatReference &&
+        left.ConcatTotal == right.ConcatTotal && left.ConcatPart == right.ConcatPart;
+
+    private static bool SameMessage(SmsMessage left, SmsMessage right)
+    {
+        if (left.Direction != right.Direction || left.Number != right.Number || left.Body != right.Body)
+        {
+            return false;
+        }
+
+        if (left.PduFingerprint is { } leftFingerprint && right.PduFingerprint is { } rightFingerprint)
+        {
+            if (leftFingerprint == rightFingerprint)
+            {
+                return true;
+            }
+        }
+
+        return left.Index != right.Index && (left.Index < 0 || right.Index < 0) &&
+               left.Timestamp.HasValue && left.Timestamp == right.Timestamp;
     }
 
     private async Task<AtResult?> SafeAsync(string cmd, CancellationToken? ct, TimeSpan? timeout = null)

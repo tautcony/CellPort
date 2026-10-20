@@ -30,6 +30,30 @@ public static class ThemeManager
                 new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(10, 5)),
             }
         });
+        app.Styles.Add(new Style(x => x.OfType<Button>().Class("nav-item"))
+        {
+            Setters =
+            {
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, Resource("SidebarSurface")),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty, Resource("TextSecondary")),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BorderBrushProperty, Brushes.Transparent),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BorderThicknessProperty, new Thickness(1)),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.CornerRadiusProperty, new CornerRadius(8)),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(10, 5)),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.FontSizeProperty, 13d),
+                new Setter(Control.MinHeightProperty, 34d),
+                new Setter(Control.HeightProperty, 34d),
+            }
+        });
+        app.Styles.Add(new Style(x => x.OfType<Button>().Class("nav-item").Class("selected"))
+        {
+            Setters =
+            {
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, Resource("NavSelected")),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty, Resource("Accent")),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.FontWeightProperty, FontWeight.SemiBold),
+            }
+        });
         app.Styles.Add(new Style(x => x.OfType<TextBox>())
         {
             Setters = { new Setter(Control.MinHeightProperty, 34d), new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(8, 5)) }
@@ -46,10 +70,6 @@ public static class ThemeManager
                 new Setter(Border.BorderThicknessProperty, new Thickness(1)),
                 new Setter(Border.CornerRadiusProperty, new CornerRadius(10)),
             }
-        });
-        app.Styles.Add(new Style(x => x.OfType<StackPanel>().Class("device-card"))
-        {
-            Setters = { new Setter(Panel.BackgroundProperty, Resource("CardSurface")), new Setter(Control.MarginProperty, new Thickness(0)) }
         });
         Apply(AppTheme.Dark);
     }
@@ -68,14 +88,14 @@ public static class ThemeManager
             ? new Dictionary<string, string>
             {
                 ["AppBackground"] = "#1C1C1E", ["SidebarSurface"] = "#232326", ["CardSurface"] = "#2C2C2E",
-                ["HoverSurface"] = "#34343A", ["SurfaceBorder"] = "#3A3A3E", ["TextPrimary"] = "#F2F2F7",
+                ["HoverSurface"] = "#34343A", ["NavSelected"] = "#273B59", ["SurfaceBorder"] = "#3A3A3E", ["TextPrimary"] = "#F2F2F7",
                 ["TextSecondary"] = "#98989F", ["Accent"] = "#0A84FF", ["Success"] = "#30D158",
                 ["Warning"] = "#FF9F0A", ["Danger"] = "#FF453A",
             }
             : new Dictionary<string, string>
             {
                 ["AppBackground"] = "#F2F2F7", ["SidebarSurface"] = "#E8E8ED", ["CardSurface"] = "#FFFFFF",
-                ["HoverSurface"] = "#E5E5EA", ["SurfaceBorder"] = "#D1D1D6", ["TextPrimary"] = "#1C1C1E",
+                ["HoverSurface"] = "#E5E5EA", ["NavSelected"] = "#DDEBFF", ["SurfaceBorder"] = "#D1D1D6", ["TextPrimary"] = "#1C1C1E",
                 ["TextSecondary"] = "#6C6C70", ["Accent"] = "#007AFF", ["Success"] = "#248A3D",
                 ["Warning"] = "#9A6700", ["Danger"] = "#D70015",
             };

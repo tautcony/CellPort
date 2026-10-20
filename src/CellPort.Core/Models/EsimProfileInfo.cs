@@ -27,6 +27,11 @@ public sealed class EsimProfileInfo
     /// <summary>类别：0 = 测试，1 = 预置（provisioning），2 = 商用（tag 95）。</summary>
     public int? ProfileClass { get; set; }
 
+    public bool IsBootstrap => ProfileClass == 1 ||
+        new[] { Nickname, ProfileName, ServiceProvider }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Any(value => value!.Trim().ToLowerInvariant() is "bootstrap" or "bootstrap profile" or "provisioning");
+
     public bool Enabled => State == 1;
 
     public string DisplayName =>

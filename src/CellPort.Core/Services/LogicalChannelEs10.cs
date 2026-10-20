@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using System.Net.Http;
 using System.Text.RegularExpressions;
 using CellPort.Core.At;
 using CellPort.Core.Models;
@@ -27,16 +29,41 @@ namespace CellPort.Core.Services;
 /// </summary>
 public sealed class LogicalChannelEs10
 {
+    private static readonly HttpClient NotificationHttpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
     private readonly AtEngine _engine;
+    private readonly HttpClient _notificationHttpClient;
     private int _channel;
+
+    /// <summary>最近成功打开的 ISD-R AID。</summary>
+    public string? IsdrAidHex { get; private set; }
 
     /// <summary>GSMA 标准 ISD-R AID（16 字节）。</summary>
     public const string StandardIsdrAidHex = "A0000005591010FFFFFFFF8900000100";
 
+    /// <summary>与 DJOneHub 一致的 ISD-R AID 候选顺序。</summary>
+    internal static readonly string[] KnownIsdrAidHexes =
+    [
+        "A06573746B6D65FFFF4953442D522030", // eSTK.me SE0
+        "A06573746B6D65FFFF4953442D522031", // eSTK.me SE1
+        StandardIsdrAidHex,
+        "A0000005591010000000008900000300", // eSIM.me
+        "A0000005591010000000890000000300", // eSIM.me V2
+        "A0000005591010FFFFFFFF8900050500", // 5ber.eSIM
+        "A0000005591010FFFFFFFF8900000177", // XeSIM
+        "A000000559104C696E6B736669656C64", // LinksField
+        "A0000006281010FFFFFFFF8900000100", // GlocalMe
+        "A06573746B6D65FFFFFFFF4953442D52", // eSTK.me AUX
+    ];
+
     /// <summary>ES10 STORE DATA 单块上限，取 lpac 默认值。</summary>
     private const int Es10xMss = 120;
 
-    public LogicalChannelEs10(AtEngine engine) => _engine = engine;
+    public LogicalChannelEs10(AtEngine engine, HttpClient? notificationHttpClient = null)
+    {
+        _engine = engine;
+        _notificationHttpClient = notificationHttpClient ?? NotificationHttpClient;
+    }
 
     /// <summary>当前逻辑通道号（0 = 未打开）。</summary>
     public int Channel => _channel;
@@ -64,7 +91,11 @@ public sealed class LogicalChannelEs10
     /// <returns>通道号；失败返回 null。</returns>
     public async Task<int?> OpenIsdrAsync(string? aidHex = null, CancellationToken ct = default)
     {
-        aidHex ??= StandardIsdrAidHex;
+        aidHex ??= IsdrAidHex ?? StandardIsdrAidHex;
+
+        if (_channel > 0)
+            await CloseAsync().ConfigureAwait(false);
+        _channel = 0;
 
         for (var i = 1; i <= 3; i++)
         {
@@ -92,6 +123,7 @@ public sealed class LogicalChannelEs10
         }
 
         _channel = ch;
+        IsdrAidHex = aidHex;
         return ch;
     }
 
@@ -307,12 +339,12 @@ public sealed class LogicalChannelEs10
     }
 
     /// <summary>
-    /// 读取 Profile 列表（ES10c GetProfilesInfo，请求 BF2D 00）。
+    /// 读取 Profile 列表（ES10c GetProfilesInfo，请求必要的 Profile 字段）。
     /// 解析规则与 lpac es10c.c 一致：BF2D → A0 → 逐个 E3 → 子 tag。
     /// </summary>
     public async Task<List<EsimProfileInfo>?> GetProfilesAsync(CancellationToken ct = default)
     {
-        byte[] req = [0xBF, 0x2D, 0x00];
+        var req = BuildProfileListRequest();
 
         var resp = await Es10CommandAsync(req, ct).ConfigureAwait(false);
         if (resp is null)
@@ -355,13 +387,13 @@ public sealed class LogicalChannelEs10
                         p.State = (int)BerTlv.ToLong(t.Value);
                         break;
                     case 0x90:
-                        p.Nickname = Ascii(t.Value);
+                        p.Nickname = DecodeProfileText(t.Value);
                         break;
                     case 0x91:
-                        p.ServiceProvider = Ascii(t.Value);
+                        p.ServiceProvider = DecodeProfileText(t.Value);
                         break;
                     case 0x92:
-                        p.ProfileName = Ascii(t.Value);
+                        p.ProfileName = DecodeProfileText(t.Value);
                         break;
                     case 0x95:
                         p.ProfileClass = (int)BerTlv.ToLong(t.Value);
@@ -374,22 +406,210 @@ public sealed class LogicalChannelEs10
         return profiles;
     }
 
+    public sealed record NotificationMetadata(long SequenceNumber, int Event, string? Iccid, string Address);
+    public sealed record PendingNotification(NotificationMetadata Metadata, string EncodedNotification);
+
+    /// <summary>读取 eUICC 通知列表。</summary>
+    public async Task<List<NotificationMetadata>?> ListNotificationsAsync(CancellationToken ct = default)
+    {
+        var response = await Es10CommandAsync(BuildListNotificationsRequest(), ct).ConfigureAwait(false);
+        var root = response is null ? null : BerTlv.Find(BerTlv.Parse(response), 0xBF28);
+        var list = root is null ? null : BerTlv.Find(BerTlv.Children(root), 0xA0);
+        if (list is null) return null;
+
+        var notifications = new List<NotificationMetadata>();
+        foreach (var node in BerTlv.Children(list))
+        {
+            if (node.Tag != 0xBF2F) continue;
+            var metadata = ParseNotificationMetadata(node);
+            if (metadata is not null) notifications.Add(metadata);
+        }
+        return notifications;
+    }
+
+    /// <summary>读取单条待发送通知，并按 SGP.22 格式发送至其 SM-DP+ 地址。</summary>
+    public async Task<string?> HandleNotificationAsync(long sequenceNumber, CancellationToken ct = default)
+    {
+        var request = BuildRetrieveNotificationRequest(sequenceNumber);
+        var response = await Es10CommandAsync(request, ct).ConfigureAwait(false);
+        var root = response is null ? null : BerTlv.Find(BerTlv.Parse(response), 0xBF2B);
+        var list = root is null ? null : BerTlv.Find(BerTlv.Children(root), 0xA0);
+        var pending = list is null
+            ? null
+            : BerTlv.Children(list).FirstOrDefault(node => node.Tag is 0xBF37 or 0x30);
+        if (pending is null)
+            return "删除通知读取失败";
+
+        var metadataNode = FindRecursive(pending, 0xBF2F);
+        var metadata = metadataNode is null ? null : ParseNotificationMetadata(metadataNode);
+        if (metadata is null || string.IsNullOrWhiteSpace(metadata.Address) || metadata.SequenceNumber != sequenceNumber)
+            return "删除通知数据无效";
+
+        var address = metadata.Address.Trim();
+        var addressUri = address.Contains("://", StringComparison.Ordinal)
+            ? address
+            : $"{Uri.UriSchemeHttps}://{address}";
+        if (!Uri.TryCreate(addressUri, UriKind.Absolute, out var absolute) || string.IsNullOrWhiteSpace(absolute.Host))
+            return "删除通知地址无效";
+        var baseUri = new UriBuilder(
+            Uri.UriSchemeHttps, absolute.Host, absolute.IsDefaultPort ? -1 : absolute.Port).Uri;
+        var endpoint = new Uri(baseUri, "/gsma/rsp2/es9plus/handleNotification");
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            pendingNotification = Convert.ToBase64String(EncodeNode(pending)),
+        });
+
+        using var content = new ByteArrayContent(payload);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
+        requestMessage.Headers.UserAgent.ParseAdd("gsma-rsp-lpad");
+        requestMessage.Headers.TryAddWithoutValidation("X-Admin-Protocol", "gsma/rsp/v2.5.0");
+        using var result = await _notificationHttpClient.SendAsync(
+            requestMessage, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
+        if (!result.IsSuccessStatusCode)
+            return "删除通知发送失败";
+        try
+        {
+            // DJOneHub treats a successful HandleNotification HTTP response as success;
+            // SGP.22 does not require functionExecutionStatus in this response.
+            var body = await result.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            if (body.Length > 0)
+            {
+                using var _ = JsonDocument.Parse(body);
+            }
+            return null;
+        }
+        catch (JsonException)
+        {
+            return "删除通知响应无效";
+        }
+    }
+
+    /// <summary>查询 eUICC 可用非易失存储空间。</summary>
+    public async Task<long?> GetFreeNvramBytesAsync(CancellationToken ct = default)
+    {
+        var response = await Es10CommandAsync([0xBF, 0x22, 0x00], ct).ConfigureAwait(false);
+        var root = response is null ? null : BerTlv.Find(BerTlv.Parse(response), 0xBF22);
+        var resource = root is null ? null : BerTlv.Find(BerTlv.Children(root), 0xA4);
+        var free = resource is null ? null : BerTlv.Find(BerTlv.Children(resource), 0x82);
+        return free is null ? null : BerTlv.ToLong(free.Value);
+    }
+
+    internal static byte[] BuildListNotificationsRequest(int? eventId = null)
+    {
+        if (eventId is null) return [0xBF, 0x28, 0x00];
+        if (eventId is < 0 or > 3) throw new ArgumentOutOfRangeException(nameof(eventId));
+        var bitString = new byte[] { 0x04, (byte)(0x80 >> eventId.Value) };
+        return EncodeTlv([0xBF, 0x28], EncodeTlv([0x81], bitString));
+    }
+
+    internal static byte[] BuildProfileListRequest() =>
+        [0xBF, 0x2D, 0x09, 0x5C, 0x07, 0x5A, 0x9F, 0x70, 0x90, 0x91, 0x92, 0x95];
+
+    internal static byte[] BuildRetrieveNotificationRequest(long sequenceNumber)
+    {
+        var sequence = EncodeTlv([0x80], EncodePositiveInteger(sequenceNumber));
+        return EncodeTlv([0xBF, 0x2B], EncodeTlv([0xA0], sequence));
+    }
+
+    private static NotificationMetadata? ParseNotificationMetadata(BerTlv.Node node)
+    {
+        var children = BerTlv.Children(node);
+        var sequence = BerTlv.Find(children, 0x80);
+        var eventValue = BerTlv.Find(children, 0x81);
+        var address = BerTlv.Find(children, 0x0C);
+        if (sequence is null || eventValue is null || address is null)
+            return null;
+        var eventIndex = ParseBitStringIndex(eventValue.Value);
+        if (eventIndex is null || eventIndex.Value > 3)
+            return null;
+        var iccid = BerTlv.Find(children, 0x5A);
+        return new NotificationMetadata(
+            BerTlv.ToLong(sequence.Value), eventIndex.Value,
+            iccid is null ? null : IccidFromBcd(iccid.Value.ToArray()),
+            Encoding.UTF8.GetString(address.Value.ToArray()));
+    }
+
+    private static int? ParseBitStringIndex(IReadOnlyList<byte> value)
+    {
+        if (value.Count < 2 || value[0] > 7) return null;
+        int? selected = null;
+        var bitCount = ((value.Count - 1) * 8) - value[0];
+        for (var index = 0; index < bitCount; index++)
+        {
+            if ((value[(index / 8) + 1] & (0x80 >> (index % 8))) == 0) continue;
+            if (selected is not null) return null;
+            selected = index;
+        }
+        return selected;
+    }
+
+    private static BerTlv.Node? FindRecursive(BerTlv.Node node, int tag)
+    {
+        if (node.Tag == tag) return node;
+        foreach (var child in BerTlv.Children(node))
+        {
+            var found = FindRecursive(child, tag);
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
+    private static byte[] EncodePositiveInteger(long value)
+    {
+        if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
+        var bytes = new List<byte>();
+        do
+        {
+            bytes.Insert(0, (byte)(value & 0xFF));
+            value >>= 8;
+        } while (value > 0);
+        if ((bytes[0] & 0x80) != 0) bytes.Insert(0, 0);
+        return bytes.ToArray();
+    }
+
+    private static byte[] EncodeNode(BerTlv.Node node) =>
+        EncodeTlv(TagBytes(node.Tag), node.Value.ToArray());
+
+    private static byte[] TagBytes(int tag)
+    {
+        var bytes = new List<byte>();
+        do
+        {
+            bytes.Insert(0, (byte)(tag & 0xFF));
+            tag >>= 8;
+        } while (tag > 0);
+        return bytes.ToArray();
+    }
+
+    private static byte[] EncodeTlv(byte[] tag, byte[] value)
+    {
+        var length = value.Length < 0x80
+            ? new[] { (byte)value.Length }
+            : value.Length <= 0xFF
+                ? new[] { (byte)0x81, (byte)value.Length }
+                : [(byte)0x82, (byte)(value.Length >> 8), (byte)value.Length];
+        return [.. tag, .. length, .. value];
+    }
+
     /// <summary>ES10c 启用 / 停用 Profile 的结果。</summary>
     /// <param name="Ok">Code == 0 即成功。</param>
     /// <param name="Code">eUICC 返回的 profileOperationResult（0 成功，见 SGP.22 ErrorReason）。</param>
     /// <param name="Message">结果说明（成功 / 错误原因）。</param>
-    public sealed record ProfileStateResult(bool Ok, long Code, string? Message);
+    public sealed record ProfileStateResult(
+        bool Ok, long Code, string? Message, string? Warning = null, long? SpaceDeltaBytes = null);
 
     /// <summary>
     /// 启用 / 停用 Profile（ES10c EnableProfile `BF31` / DisableProfile `BF32`）。
     ///
-    /// 请求编码与 lpac es10c.c 逐字节对齐（refreshFlag = FALSE，由宿主负责重启刷新）：
-    ///   BF31 &lt;len&gt; A0 &lt;len&gt; 4F &lt;len&gt; &lt;ISD-P AID&gt; 81 01 00
+    /// 请求编码与 DJOneHub AT 路径一致（refreshFlag = TRUE）：
+    ///   BF31 &lt;len&gt; A0 &lt;len&gt; 5A 0A &lt;ICCID BCD&gt; 81 01 FF
     /// 响应：BF31 &lt;len&gt; 80 01 &lt;code&gt;，code=0 成功；
-    ///   1 = incorrectInputValues，2 = invalidProfile，3 = insufficientMemory。
+    ///   1 = ICCID/AID not found，2 = profile state invalid，3 = disallowed by policy，
+    ///   4 = wrong profile reenabling，5 = CAT busy，127 = undefined error。
     /// </summary>
     internal async Task<ProfileStateResult> SetProfileStateAsync(
-        string isdpAidHex, bool enable, CancellationToken ct = default)
+        string profileIdentifier, bool enable, CancellationToken ct = default)
     {
         if (_channel <= 0)
         {
@@ -399,11 +619,11 @@ public sealed class LogicalChannelEs10
         byte[] req;
         try
         {
-            req = BuildProfileStateRequest(enable, isdpAidHex);
+            req = BuildProfileStateRequest(enable, profileIdentifier, refresh: true);
         }
-        catch (ArgumentException)
+        catch (ArgumentException ex)
         {
-            return new ProfileStateResult(false, -1, "ISD-P AID 格式错误");
+            return new ProfileStateResult(false, -1, $"Profile 标识格式错误：{ex.Message}");
         }
 
         return await ExecuteProfileOpAsync(req, enable ? 0xBF31 : 0xBF32, ct).ConfigureAwait(false);
@@ -465,8 +685,8 @@ public sealed class LogicalChannelEs10
 
     /// <summary>
     /// 设置 / 清除 Profile 昵称（ES10c SetNickname `BF29`，lpac es10c_set_nickname 同款）。
-    /// SGP.22 规定昵称按 ICCID 定位（tag 5A，BCD 10 字节），昵称为 ASCII（tag 90，0..64 字节）：
-    ///   BF29 &lt;len&gt; 5A 0A &lt;ICCID BCD&gt; 90 &lt;len&gt; &lt;ascii&gt;
+    /// SGP.22 规定昵称按 ICCID 定位（tag 5A，BCD 10 字节），昵称用 tag 90 承载 UTF-8（0..64 字节）：
+    ///   BF29 &lt;len&gt; 5A 0A &lt;ICCID BCD&gt; 90 &lt;len&gt; &lt;utf8&gt;
     /// 传空字符串即清除昵称。响应：BF29 &lt;len&gt; 80 01 &lt;code&gt;。
     /// 昵称写入不影响 Profile 运行状态，无需重启模块。
     /// </summary>
@@ -494,12 +714,11 @@ public sealed class LogicalChannelEs10
     // ---------- 报文编码（internal，供单元测试逐字节验证） ----------
 
     /// <summary>
-    /// 构造 BF31（启用）/ BF32（停用）请求，与 lpac es10c_enable_disable_delete_profile
-    /// 的 A0 包装分支逐字节对齐，refreshFlag 固定 FALSE（由宿主负责重启刷新）：
-    ///   BF31 &lt;len&gt; A0 &lt;len&gt; 4F &lt;len&gt; &lt;ISD-P AID&gt; 81 01 00
-    /// id 为 32 字符 hex（ISD-P AID）时用 tag 4F，否则按 ICCID 用 tag 5A（BCD）。
+    /// 构造 BF31（启用）/ BF32（停用）请求，与 DJOneHub AT 路径逐字节对齐：
+    ///   BF31 &lt;len&gt; A0 &lt;len&gt; 5A 0A &lt;ICCID BCD&gt; 81 01 FF
+    /// 也接受 32 字符 hex 的 ISD-P AID 作为备用标识。
     /// </summary>
-    internal static byte[] BuildProfileStateRequest(bool enable, string id)
+    internal static byte[] BuildProfileStateRequest(bool enable, string id, bool refresh = true)
     {
         var ident = BuildProfileIdentifier(id);
         var choiceLen = ident.Length + 3; // ident + 81 01 00
@@ -513,13 +732,12 @@ public sealed class LogicalChannelEs10
         var f = 5 + ident.Length;
         req[f] = 0x81;
         req[f + 1] = 0x01;
-        req[f + 2] = 0x00;
+        req[f + 2] = refresh ? (byte)0xFF : (byte)0x00;
         return req;
     }
 
     /// <summary>
-    /// 构造 BF33（删除）请求：BF33 &lt;len&gt; 4F/5A &lt;len&gt; &lt;id&gt;，无 A0 包装、无 refreshFlag
-    /// （lpac 中 delete 以 refreshFlag=0 走「无包装」分支）。
+    /// 构造 BF33（删除）请求：BF33 &lt;len&gt; 5A 0A &lt;ICCID BCD&gt;，无 A0 包装、无 refreshFlag。
     /// </summary>
     internal static byte[] BuildDeleteProfileRequest(string id)
     {
@@ -533,8 +751,8 @@ public sealed class LogicalChannelEs10
     }
 
     /// <summary>
-    /// 构造 BF29（设昵称）请求：BF29 &lt;len&gt; 5A 0A &lt;ICCID BCD(10)&gt; 90 &lt;len&gt; &lt;ascii&gt;。
-    /// 空昵称编码为 90 00（SGP.22 ProfileNickname SIZE(0..64)，长度 0 即清除）。
+    /// 构造 BF29（设昵称）请求：BF29 &lt;len&gt; 5A 0A &lt;ICCID BCD(10)&gt; 90 &lt;len&gt; &lt;utf8&gt;。
+    /// 空昵称编码为 90 00（长度 0 即清除）。
     /// </summary>
     internal static byte[] BuildNicknameRequest(string iccid, string nickname)
     {
@@ -542,13 +760,22 @@ public sealed class LogicalChannelEs10
         {
             throw new ArgumentException("ICCID 应为 18~20 位数字");
         }
-        if (nickname.Length > 64 || nickname.Any(c => c > 0x7F))
+        byte[] nicknameBytes;
+        try
         {
-            throw new ArgumentException("昵称应为不超过 64 个 ASCII 字符");
+            nicknameBytes = StrictUtf8.GetBytes(nickname);
+        }
+        catch (EncoderFallbackException ex)
+        {
+            throw new ArgumentException("昵称不是有效的 UTF-8 字符串", nameof(nickname), ex);
+        }
+        if (nicknameBytes.Length > 64)
+        {
+            throw new ArgumentException("昵称应为不超过 64 个 UTF-8 字节");
         }
 
         var bcd = IccidToBcd(iccid, 10);
-        var nick = Encoding.ASCII.GetBytes(nickname);
+        var nick = nicknameBytes;
         // 5A TLV(12) + 90 TLV(2+n)
         var req = new byte[3 + 12 + 2 + nick.Length];
         req[0] = 0xBF;
@@ -628,9 +855,12 @@ public sealed class LogicalChannelEs10
     private static string DescribeResultCode(long code) => code switch
     {
         0 => "成功",
-        1 => "输入值不正确（incorrectInputValues）",
-        2 => "Profile 无效（invalidProfile）",
-        3 => "存储空间不足（insufficientMemory）",
+        1 => "ICCID 或 AID 未找到",
+        2 => "Profile 状态不符合操作要求",
+        3 => "操作被策略拒绝",
+        4 => "当前 Profile 不允许重新启用",
+        5 => "CAT 忙碌",
+        127 => "未定义错误",
         _ => $"未定义错误（code={code}）",
     };
 
@@ -669,15 +899,8 @@ public sealed class LogicalChannelEs10
         return result;
     }
 
-    private static string Ascii(IReadOnlyList<byte> bytes)
-    {
-        var arr = new byte[bytes.Count];
-        for (var i = 0; i < bytes.Count; i++)
-        {
-            arr[i] = bytes[i];
-        }
-        return Encoding.ASCII.GetString(arr).Trim('\0');
-    }
+    internal static string DecodeProfileText(IReadOnlyList<byte> bytes) =>
+        Encoding.UTF8.GetString(bytes.ToArray());
 
     /// <summary>
     /// ICCID 按低 nibble 在前的 BCD 存储，还原为数字串并去掉 F 填充。

@@ -10,6 +10,9 @@ namespace CellPort.Core.Services;
 public sealed class DeviceInfoService(AtEngine engine)
 {
     private readonly AtEngine _engine = engine;
+    private string? _preferredIsdrAidHex;
+
+    public HttpClient? EsimNotificationHttpClient { get; set; }
 
     /// <summary>
     /// 读取一份完整状态快照。各字段独立容错，单项失败不影响整体。
@@ -146,12 +149,17 @@ public sealed class DeviceInfoService(AtEngine engine)
     public async Task<EuiccProbeResult> ProbeEuiccAsync(CancellationToken ct = default)
     {
         // ---------- 路径一：逻辑通道（CCHO / CGLA）----------
-        var es10 = new LogicalChannelEs10(_engine);
+        var es10 = new LogicalChannelEs10(_engine, EsimNotificationHttpClient);
+        Es10 = null;
 
         bool supported;
         try
         {
             supported = await es10.CheckSupportedAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -160,42 +168,60 @@ public sealed class DeviceInfoService(AtEngine engine)
 
         if (supported)
         {
-            var channel = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
-            if (channel is int ch)
-            {
-                var eid = await es10.GetEidAsync(ct).ConfigureAwait(false);
+            var aidCandidates = new List<string>();
+            if (!string.IsNullOrWhiteSpace(_preferredIsdrAidHex))
+                aidCandidates.Add(_preferredIsdrAidHex);
+            aidCandidates.AddRange(LogicalChannelEs10.KnownIsdrAidHexes.Where(aid =>
+                !string.Equals(aid, _preferredIsdrAidHex, StringComparison.OrdinalIgnoreCase)));
 
-                List<EsimProfileInfo> profiles = [];
-                var profilesOk = false;
+            foreach (var aid in aidCandidates)
+            {
+                var channel = await es10.OpenIsdrAsync(aid, ct).ConfigureAwait(false);
+                if (channel is not int ch)
+                    continue;
+
                 try
                 {
-                    profiles = await es10.GetProfilesAsync(ct).ConfigureAwait(false) ?? [];
-                    profilesOk = true;
-                }
-                catch
-                {
-                    // Profile 读取失败不算致命
-                }
+                    string? eid;
+                    try { eid = await es10.GetEidAsync(ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { throw; }
+                    catch { eid = null; }
 
-                // 判据：EID 或 Profile 任一可读即认为 eUICC 可用。
-                // 实测部分卡（如 9eSIM）不支持 ES10c GetEuiccData，但 Profile 可读。
-                if (!string.IsNullOrWhiteSpace(eid) || profilesOk)
-                {
-                    Es10 = es10;
-                    return new EuiccProbeResult(
-                        EuiccCapability.Ready, eid, profiles, $"逻辑通道 {ch}");
-                }
+                    List<EsimProfileInfo> profiles = [];
+                    var profilesOk = false;
+                    try
+                    {
+                        profiles = await es10.GetProfilesAsync(ct).ConfigureAwait(false) ?? [];
+                        profilesOk = true;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // Profile 读取失败不算致命
+                    }
 
-                await es10.CloseAsync().ConfigureAwait(false);
-                return new EuiccProbeResult(
-                    EuiccCapability.IsdrNotFound, null, [],
-                    $"CCHO 已打开逻辑通道 {ch}，但 EID 与 Profile 均读取失败 —— 卡内无 eUICC 应用或响应异常。");
+                    // 判据：EID 或 Profile 任一可读即认为 eUICC 可用。
+                    // 实测部分卡（如 9eSIM）不支持 ES10c GetEuiccData，但 Profile 可读。
+                    if (!string.IsNullOrWhiteSpace(eid) || profilesOk)
+                    {
+                        _preferredIsdrAidHex = aid;
+                        Es10 = es10;
+                        return new EuiccProbeResult(
+                            EuiccCapability.Ready, eid, profiles, $"逻辑通道 {ch}");
+                    }
+                }
+                finally
+                {
+                    await es10.CloseAsync().ConfigureAwait(false);
+                }
             }
 
-            await es10.CloseAsync().ConfigureAwait(false);
             return new EuiccProbeResult(
                 EuiccCapability.IsdrNotFound, null, [],
-                "AT+CCHO 未能为 ISD-R AID 打开逻辑通道 —— 卡内大概率没有 eUICC 应用。");
+                "未找到可读取的 ISD-R 应用。");
         }
 
         // ---------- 路径二：CSIM 诊断（仅在固件不支持逻辑通道时）----------

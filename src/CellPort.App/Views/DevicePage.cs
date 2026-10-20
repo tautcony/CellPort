@@ -90,7 +90,7 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
     private void BuildContent()
     {
         var info = Card("模块信息");
-        info.Children.Add(InfoGrid);
+        CardContent(info).Children.Add(InfoGrid);
 
         var usb = Card("USB 接口");
         var scanRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
@@ -101,8 +101,8 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
             Grid.SetColumn(OpenDeviceManagerButton, 2);
             scanRow.Children.Add(OpenDeviceManagerButton);
         }
-        usb.Children.Add(scanRow);
-        usb.Children.Add(UsbSummary);
+        CardContent(usb).Children.Add(scanRow);
+        CardContent(usb).Children.Add(UsbSummary);
 
         var serial = Card("通信通道");
         var serialRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto"), ColumnSpacing = 8 };
@@ -113,17 +113,17 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
         serialRow.Children.Add(RefreshPortsButton);
         Grid.SetColumn(ReconnectButton, 3);
         serialRow.Children.Add(ReconnectButton);
-        serial.Children.Add(serialRow);
-        serial.Children.Add(ChannelStatus);
+        CardContent(serial).Children.Add(serialRow);
+        CardContent(serial).Children.Add(ChannelStatus);
 
-        StackPanel? driver = null;
+        Border? driver = null;
         if (PlatformServices.CanBindWinUsb)
         {
             driver = Card("驱动");
             var driverRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             driverRow.Children.Add(OpenDeviceManagerButton);
             driverRow.Children.Add(DriverSetupButton);
-            driver.Children.Add(driverRow);
+            CardContent(driver).Children.Add(driverRow);
         }
 
         var ussd = Card("USSD 查询");
@@ -131,16 +131,16 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
         ussdRow.Children.Add(UssdBox);
         Grid.SetColumn(UssdSendButton, 1);
         ussdRow.Children.Add(UssdSendButton);
-        ussd.Children.Add(ussdRow);
-        ussd.Children.Add(UssdResult);
+        CardContent(ussd).Children.Add(ussdRow);
+        CardContent(ussd).Children.Add(UssdResult);
 
         var phonebook = Card("SIM 电话簿");
         var phonebookHead = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         Grid.SetColumn(PhonebookButton, 1);
         phonebookHead.Children.Add(PhonebookButton);
-        phonebook.Children.Add(phonebookHead);
-        phonebook.Children.Add(PhonebookSummary);
-        phonebook.Children.Add(new ScrollViewer { MaxHeight = 260, Content = PhonebookPanel });
+        CardContent(phonebook).Children.Add(phonebookHead);
+        CardContent(phonebook).Children.Add(PhonebookSummary);
+        CardContent(phonebook).Children.Add(new ScrollViewer { MaxHeight = 260, Content = PhonebookPanel });
 
         var panel = new StackPanel { Spacing = 9 };
         panel.Children.Add(info);
@@ -432,13 +432,14 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
         finally { _lifetime.Dispose(); }
     }
 
-    private static StackPanel Card(string heading)
+    private static Border Card(string heading)
     {
-        var card = new StackPanel { Spacing = 9, Margin = new Thickness(0, 0, 0, 0) };
-        card.Classes.Add("device-card");
-        card.Children.Add(Text(heading, 14, true));
-        return card;
+        var content = new StackPanel { Spacing = 9 };
+        content.Children.Add(Text(heading, 14, true));
+        return new Border { Classes = { "app-card" }, Padding = new Thickness(14), Child = content };
     }
+
+    private static StackPanel CardContent(Border card) => (StackPanel)card.Child!;
 
     private static Button Button(string content, string name, bool primary = false) => new()
     {

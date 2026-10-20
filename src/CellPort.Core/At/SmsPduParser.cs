@@ -9,6 +9,8 @@ public sealed class SmsMessage
     /// <summary>模块存储索引，用于删除。</summary>
     public int Index { get; set; } = -1;
 
+    internal string? PduFingerprint { get; set; }
+
     /// <summary>对端号码。</summary>
     public string Number { get; set; } = string.Empty;
 
@@ -95,21 +97,36 @@ public static class SmsPduParser
 
             var firstOctet = reader.ReadByte();
             var hasUdh = (firstOctet & 0x40) != 0;         // TP-UDHI
-            var isStatusReport = (firstOctet & 0x02) != 0; // TP-SRI（状态报告）
+            var messageType = firstOctet & 0x03;           // TP-MTI
+            var isSubmit = messageType == 0x01;
 
-            // 对端地址
-            var number = ReadAddress(reader, out _);
-
-            if (isStatusReport)
+            // DELIVER、SUBMIT 都包含对端地址；SUBMIT 前面另有一个 TP-MR 字节。
+            if (messageType == 0x02 || messageType == 0x03)
             {
-                return null; // 状态报告暂不展开
+                return null; // STATUS-REPORT 与保留类型暂不展开
+            }
+            if (isSubmit)
+            {
+                reader.Skip(1); // TP-MR
             }
 
-            var pid = reader.ReadByte();
+            var number = ReadAddress(ref reader, out _);
+            reader.ReadByte(); // TP-PID
             var dcs = reader.ReadByte();
 
-            // 时间戳（7 字节 BCD）
-            var timestamp = ReadTimestamp(reader);
+            DateTime? timestamp;
+            if (isSubmit)
+            {
+                // TP-VPF (bits 4..3): 00 none, 10 relative (1 octet),
+                // 01 enhanced, 11 absolute (both 7 octets).
+                var validityPeriodFormat = (firstOctet >> 3) & 0x03;
+                reader.Skip(validityPeriodFormat switch { 0 => 0, 2 => 1, _ => 7 });
+                timestamp = null;
+            }
+            else
+            {
+                timestamp = ReadTimestamp(ref reader); // TP-SCTS（7 字节 BCD）
+            }
 
             var udLength = reader.ReadByte();
             var ud = reader.ReadRemaining();
@@ -130,9 +147,10 @@ public static class SmsPduParser
             {
                 Number = number,
                 Body = body,
+                PduFingerprint = Convert.ToHexString(bytes),
                 Timestamp = timestamp,
-                Direction = SmsDirection.Incoming,
-                Status = SmsStatus.Unread,
+                Direction = isSubmit ? SmsDirection.Outgoing : SmsDirection.Incoming,
+                Status = isSubmit ? SmsStatus.Sent : SmsStatus.Unread,
                 ConcatReference = concatRef,
                 ConcatTotal = concatTotal,
                 ConcatPart = concatPart,
@@ -211,11 +229,12 @@ public static class SmsPduParser
         return SmsCodec.DecodeGsm7Bit(ud, septetCount);
     }
 
-    private static string ReadAddress(PduReader reader, out byte typeOfAddress)
+    private static string ReadAddress(ref PduReader reader, out byte typeOfAddress)
     {
         var addrLen = reader.ReadByte();
         typeOfAddress = reader.ReadByte();
-        var digitCount = addrLen - 1;
+        // TP-OA/TP-DA length counts address digits; TOA is a separate octet.
+        var digitCount = addrLen;
         if (digitCount <= 0)
         {
             return string.Empty;
@@ -250,7 +269,7 @@ public static class SmsPduParser
             _ => 'F',
         };
 
-    private static DateTime? ReadTimestamp(PduReader reader)
+    private static DateTime? ReadTimestamp(ref PduReader reader)
     {
         try
         {

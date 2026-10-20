@@ -29,19 +29,20 @@ public sealed class SmsPage : UserControl, IModuleAware, IDisposable, IAsyncDisp
     internal Func<string, string, Task>? ShowOverride { get; set; }
     internal Func<string, Task<(string Name, Stream Stream)?>>? ExportPickerOverride { get; set; }
 
-    public ListBox ThreadList { get; } = new() { Name = "ThreadList", Width = 220 };
+    public ListBox ThreadList { get; } = new() { Name = "ThreadList", HorizontalAlignment = HorizontalAlignment.Stretch };
     public Button SendButton { get; } = new() { Name = "SendButton", Content = "发送", IsEnabled = false };
     public Button RefreshButton { get; } = new() { Name = "RefreshButton", Content = "刷新" };
     public Button CallButton { get; } = new() { Name = "CallButton", Content = "拨打" };
     public Button ExportCsvButton { get; } = new() { Name = "ExportCsvButton", Content = "导出 CSV" };
     public Button ExportJsonButton { get; } = new() { Name = "ExportJsonButton", Content = "导出 JSON" };
-    public TextBox NumberBox { get; } = new() { PlaceholderText = "目标号码", Width = 150 };
+    public TextBox NumberBox { get; } = new() { PlaceholderText = "目标号码", HorizontalAlignment = HorizontalAlignment.Stretch };
     public TextBox BodyBox { get; } = new() { PlaceholderText = "短信内容（Ctrl+Enter 发送）", AcceptsReturn = true };
     private readonly TextBlock _detailNumber = new() { Text = "选择一条会话", FontSize = 14 };
     private readonly TextBlock _detailMeta = new();
     public StackPanel MessagePanel { get; } = new() { Name = "MessagePanel", Spacing = 8 };
     private readonly ScrollViewer _messageScroller;
     private readonly TextBlock _status = new();
+    private readonly TextBlock _threadEmptyState = new() { Text = "暂无短信", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
 
     public SmsPage()
     {
@@ -59,16 +60,22 @@ public sealed class SmsPage : UserControl, IModuleAware, IDisposable, IAsyncDisp
             stack.Children.Add(new TextBlock { Text = $"{item.Count} 条 · {item.Preview}", TextTrimming = TextTrimming.CharacterEllipsis, Opacity = .8 });
             return stack;
         });
-        var left = new DockPanel(); left.Children.Add(ThreadList);
+        var threadContent = new Grid();
+        threadContent.Children.Add(ThreadList);
+        threadContent.Children.Add(_threadEmptyState);
+        var left = new Border { Classes = { "app-card" }, Padding = new Thickness(4), Child = threadContent };
         var right = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
         var conversationHeader = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(12) };
         var titleStack = new StackPanel(); titleStack.Children.Add(_detailNumber); titleStack.Children.Add(_detailMeta);
-        conversationHeader.Children.Add(titleStack); Grid.SetColumn(CallButton, 1); conversationHeader.Children.Add(CallButton);
+        conversationHeader.Children.Add(titleStack);
         right.Children.Add(conversationHeader);
         _messageScroller = new ScrollViewer { Content = MessagePanel, Margin = new Thickness(12), VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
         Grid.SetRow(_messageScroller, 1); right.Children.Add(_messageScroller);
         var compose = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto"), Margin = new Thickness(12), RowSpacing = 6 };
-        Grid.SetRow(NumberBox, 0); compose.Children.Add(NumberBox);
+        var recipientRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+        recipientRow.Children.Add(NumberBox);
+        Grid.SetColumn(CallButton, 1); recipientRow.Children.Add(CallButton);
+        Grid.SetRow(recipientRow, 0); compose.Children.Add(recipientRow);
         var sendRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
         BodyBox.MinHeight = 34; BodyBox.MaxHeight = 110;
         Grid.SetColumn(BodyBox, 0); sendRow.Children.Add(BodyBox);
@@ -76,9 +83,12 @@ public sealed class SmsPage : UserControl, IModuleAware, IDisposable, IAsyncDisp
         Grid.SetRow(sendRow, 1); compose.Children.Add(sendRow);
         Grid.SetRow(_status, 2); compose.Children.Add(_status);
         Grid.SetRow(compose, 2); right.Children.Add(compose);
-        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("220,12,*") };
-        body.Children.Add(left); Grid.SetColumn(right, 2); body.Children.Add(right);
-        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Margin = new Thickness(16) };
+        var rightCard = new Border { Classes = { "app-card" }, Child = right };
+        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("2*,12,5*") };
+        body.ColumnDefinitions[0].MinWidth = 230;
+        body.ColumnDefinitions[0].MaxWidth = 360;
+        body.Children.Add(left); Grid.SetColumn(rightCard, 2); body.Children.Add(rightCard);
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 12, Margin = new Thickness(16) };
         Grid.SetRow(toolbar, 0); layout.Children.Add(toolbar); Grid.SetRow(body, 1); layout.Children.Add(body);
         Content = layout;
 
@@ -135,7 +145,7 @@ public sealed class SmsPage : UserControl, IModuleAware, IDisposable, IAsyncDisp
         if (_disposed) return;
         _threads.Clear();
         var inbox = _inboxOverride ?? _modem?.Sms?.Inbox;
-        if (inbox is null) { ThreadList.ItemsSource = null; ClearConversation("未连接模块", ""); return; }
+        if (inbox is null) { ThreadList.ItemsSource = null; _threadEmptyState.Text = "未连接模块"; _threadEmptyState.IsVisible = true; ClearConversation("未连接模块", ""); return; }
         foreach (var msg in inbox)
         {
             var key = NormalizeForThread(msg.Number);
@@ -150,6 +160,8 @@ public sealed class SmsPage : UserControl, IModuleAware, IDisposable, IAsyncDisp
                 Count = pair.Value.Count, HasCode = pair.Value.Any(m => m.VerificationCode is not null) };
         }).OrderByDescending(i => i.Time ?? DateTime.MinValue).ToList();
         ThreadList.ItemsSource = items;
+        _threadEmptyState.Text = "暂无短信";
+        _threadEmptyState.IsVisible = items.Count == 0;
         var selected = items.FirstOrDefault(i => i.Key == _activeNumber) ?? items.FirstOrDefault();
         if (selected is null) { _activeNumber = _activeRecipient = null; ClearConversation("暂无短信", ""); }
         else ThreadList.SelectedItem = selected;

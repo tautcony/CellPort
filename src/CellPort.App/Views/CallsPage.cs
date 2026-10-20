@@ -39,6 +39,7 @@ public sealed class CallsPage : UserControl, IModuleAware, IDisposable, IAsyncDi
     public TextBlock AudioSessionText { get; }
     public UniformGrid KeypadGrid { get; }
     public ListBox HistoryList { get; }
+    private readonly TextBlock _historyEmptyState;
 
     public CallsPage() : this(new AudioSessionLifecycle()) { }
 
@@ -62,13 +63,23 @@ public sealed class CallsPage : UserControl, IModuleAware, IDisposable, IAsyncDi
         HistoryList = new ListBox
         {
             Name = "HistoryList",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
         };
+        _historyEmptyState = MakeText("暂无通话记录");
+        _historyEmptyState.HorizontalAlignment = HorizontalAlignment.Center;
+        _historyEmptyState.VerticalAlignment = VerticalAlignment.Center;
+        _historyEmptyState.IsHitTestVisible = false;
 
         DialButton.Click += (_, _) => StartOperation(DialAsync);
         HangupButton.Click += (_, _) => StartOperation(HangupAsync);
         AnswerButton.Click += (_, _) => StartOperation(AnswerAsync);
         MuteButton.Click += (_, _) => StartOperation(MuteAsync);
         BuildKeypad();
+        DialNumberBox.MinHeight = 42;
+        DialNumberBox.MaxWidth = 620;
+        // Match each column to the button plus its margins so horizontal and vertical gaps stay equal.
+        KeypadGrid.Width = 144;
 
         var numberRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 8 };
         numberRow.Children.Add(DialNumberBox);
@@ -82,29 +93,46 @@ public sealed class CallsPage : UserControl, IModuleAware, IDisposable, IAsyncDi
         controls.Children.Add(MuteButton);
         controls.Children.Add(CallStateText);
 
-        var left = new StackPanel { Spacing = 8 };
+        var left = new StackPanel { Spacing = 10, MaxWidth = 780, VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(MakeText("拨号", 15, true));
         left.Children.Add(numberRow);
         left.Children.Add(controls);
         left.Children.Add(AudioAvailabilityText);
         left.Children.Add(AudioSessionText);
 
-        var top = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 18, Margin = new Thickness(16) };
+        var top = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 18 };
         top.Children.Add(left);
         Grid.SetColumn(KeypadGrid, 1);
         top.Children.Add(KeypadGrid);
+        var topCard = new Border { Classes = { "app-card" }, Padding = new Thickness(16), Child = top };
 
-        var history = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 8, Margin = new Thickness(16, 0, 16, 16) };
+        var historyContent = new Grid();
+        historyContent.Children.Add(HistoryList);
+        historyContent.Children.Add(_historyEmptyState);
+        var history = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 12 };
         history.Children.Add(MakeText("通话记录", 15, true));
-        Grid.SetRow(HistoryList, 1);
-        history.Children.Add(HistoryList);
-        var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 12 };
-        content.Children.Add(top);
-        Grid.SetRow(history, 1);
-        content.Children.Add(history);
+        Grid.SetRow(historyContent, 1);
+        history.Children.Add(historyContent);
+        var historyCard = new Border { Classes = { "app-card" }, Padding = new Thickness(16), Child = history };
+        var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 12, Margin = new Thickness(16) };
+        content.Children.Add(topCard);
+        Grid.SetRow(historyCard, 1);
+        content.Children.Add(historyCard);
         Content = content;
 
-        foreach (var button in KeypadGrid.Children.OfType<Button>()) button.Margin = new Thickness(2);
+        foreach (var button in KeypadGrid.Children.OfType<Button>())
+        {
+            button.Width = 44;
+            button.Height = 40;
+            button.MinWidth = 0;
+            button.Margin = new Thickness(2);
+            button.Padding = new Thickness(0);
+            button.FontSize = 15;
+            button.HorizontalAlignment = HorizontalAlignment.Center;
+            button.VerticalAlignment = VerticalAlignment.Center;
+            button.HorizontalContentAlignment = HorizontalAlignment.Center;
+            button.VerticalContentAlignment = VerticalAlignment.Center;
+        }
         _audioSessionLifecycle.StateChanged += OnAudioSessionChanged;
         AppSettings.SettingsChanged += OnSettingsChanged;
         UpdateState();
@@ -173,7 +201,6 @@ public sealed class CallsPage : UserControl, IModuleAware, IDisposable, IAsyncDi
         foreach (var digit in new[] { "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#" })
         {
             var button = MakeButton(digit, $"Key{(digit == "*" ? "Star" : digit == "#" ? "Hash" : digit)}");
-            button.MinWidth = 48;
             button.Click += (_, _) => StartOperation(() => KeypadAsync(digit));
             KeypadGrid.Children.Add(button);
         }
@@ -268,12 +295,14 @@ public sealed class CallsPage : UserControl, IModuleAware, IDisposable, IAsyncDi
 
     private void ReloadHistory()
     {
-        HistoryList.ItemsSource = _modem?.Calls?.History.Select(c =>
+        var rows = _modem?.Calls?.History.Select(c =>
         {
             var direction = c.Direction == CallDirection.Outgoing ? "↗" : c.Missed ? "✕" : "↙";
             var duration = c.Duration is { TotalSeconds: > 0 } d ? FormatDuration(d) : string.Empty;
             return $"{direction}  {DisplayNumber(c.Number)}     {duration}     {c.Timestamp:MM-dd HH:mm}";
-        }).ToList();
+        }).ToList() ?? [];
+        HistoryList.ItemsSource = rows;
+        _historyEmptyState.IsVisible = rows.Count == 0;
     }
 
     private void StartOperation(Func<Task> operation)

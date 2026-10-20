@@ -389,7 +389,80 @@ public sealed class ModemManager : IAsyncDisposable
         RunCallControlAsync(calls => calls.SendDtmfAsync(digit, ct), ct);
 
     public async Task<LogicalChannelEs10.ProfileStateResult> SetEsimProfileStateAsync(
-        string isdpAidHex, bool enable, CancellationToken ct = default)
+        string profileIdentifier, bool enable, CancellationToken ct = default)
+    {
+        var es10 = Info?.Es10;
+        if (es10 is null)
+            return new LogicalChannelEs10.ProfileStateResult(false, -1, "eUICC 通道未就绪");
+
+        var admission = await TryAcquireOperationAsync(ModuleOperationKind.EsimModification, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+            return new LogicalChannelEs10.ProfileStateResult(false, -2, $"操作被仲裁器拒绝：{admission.ErrorCode}");
+        await using var lease = admission.Lease;
+
+        var activeIccidBefore = await ReadCurrentIccidAsync(ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(activeIccidBefore))
+            UpdateCurrentIccid(activeIccidBefore);
+        if (enable)
+        {
+            if (string.Equals(activeIccidBefore, profileIdentifier, StringComparison.Ordinal))
+                return new LogicalChannelEs10.ProfileStateResult(true, 0, "Profile 已启用");
+        }
+
+        if (es10.Channel <= 0)
+        {
+            var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
+            if (opened is null || opened <= 0)
+                return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
+        }
+        try
+        {
+            LogicalChannelEs10.ProfileStateResult result;
+            const int maxCatBusyRetries = 3;
+            for (var attempt = 0; ; attempt++)
+            {
+                result = await es10.SetProfileStateAsync(profileIdentifier, enable, ct).ConfigureAwait(false);
+                if (!enable || result.Code != 5 || attempt >= maxCatBusyRetries)
+                    break;
+                await Task.Delay(TimeSpan.FromMilliseconds(800), ct).ConfigureAwait(false);
+            }
+
+            if (result.Ok)
+            {
+                if (enable)
+                    UpdateCurrentIccid(profileIdentifier);
+                else if (string.Equals(activeIccidBefore, profileIdentifier, StringComparison.Ordinal))
+                    UpdateCurrentIccid(null);
+                return result;
+            }
+
+            // refresh=true can reset the UICC before the modem returns the APDU response.
+            // Confirm the requested state from a fresh profile list before reporting failure.
+            if (result.Code < 0)
+            {
+                await es10.CloseAsync().ConfigureAwait(false);
+                var expectedState = enable ? 1 : 0;
+                if (await WaitForEsimProfileStateAsync(es10, profileIdentifier, expectedState, ct).ConfigureAwait(false))
+                {
+                    if (enable)
+                        UpdateCurrentIccid(profileIdentifier);
+                    else if (string.Equals(activeIccidBefore, profileIdentifier, StringComparison.Ordinal))
+                        UpdateCurrentIccid(null);
+                    return new LogicalChannelEs10.ProfileStateResult(true, 0, "Profile 状态已确认");
+                }
+            }
+
+            return result;
+        }
+        finally
+        {
+            await es10.CloseAsync().ConfigureAwait(false);
+        }
+    }
+
+    public async Task<LogicalChannelEs10.ProfileStateResult> DeleteEsimProfileAsync(
+        string iccid, CancellationToken ct = default)
     {
         var es10 = Info?.Es10;
         if (es10 is null)
@@ -405,7 +478,197 @@ public sealed class ModemManager : IAsyncDisposable
             if (opened is null || opened <= 0)
                 return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
         }
-        return await es10.SetProfileStateAsync(isdpAidHex, enable, ct).ConfigureAwait(false);
+        try
+        {
+            var profiles = await es10.GetProfilesAsync(ct).ConfigureAwait(false);
+            var profile = profiles?.FirstOrDefault(item => string.Equals(item.Iccid, iccid, StringComparison.Ordinal));
+            if (profile is null || profile.State != 0 || profile.IsBootstrap)
+                return new LogicalChannelEs10.ProfileStateResult(false, -3, "Profile 不可删除");
+
+            var notificationsBefore = await TryListEsimNotificationsAsync(es10, ct).ConfigureAwait(false);
+            var lastSequence = notificationsBefore?.Select(item => item.SequenceNumber).DefaultIfEmpty(0).Max() ?? 0;
+            var freeNvramBefore = await TryGetFreeEsimNvramAsync(es10, ct).ConfigureAwait(false);
+            var result = await es10.DeleteProfileAsync(iccid, ct).ConfigureAwait(false);
+            if (!result.Ok) return result;
+
+            string? warning;
+            try
+            {
+                warning = await HandleNewDeleteNotificationAsync(es10, lastSequence, iccid, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                warning = "删除通知未处理";
+            }
+            catch
+            {
+                warning = "删除通知未处理";
+            }
+
+            long? freeNvramAfter = null;
+            if (!ct.IsCancellationRequested)
+            {
+                try { freeNvramAfter = await ReadFreeEsimNvramWithRetryAsync(es10, attempts: 3, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }
+            long? spaceDelta = freeNvramBefore is > 0 && freeNvramAfter is long after && after > freeNvramBefore.Value
+                ? after - freeNvramBefore.Value
+                : null;
+            return result with { Message = "删除成功", Warning = warning, SpaceDeltaBytes = spaceDelta };
+        }
+        finally
+        {
+            await es10.CloseAsync().ConfigureAwait(false);
+        }
+    }
+
+    public async Task<LogicalChannelEs10.ProfileStateResult> RenameEsimProfileAsync(
+        string iccid, string nickname, CancellationToken ct = default)
+    {
+        var es10 = Info?.Es10;
+        if (es10 is null)
+            return new LogicalChannelEs10.ProfileStateResult(false, -1, "eUICC 通道未就绪");
+        var admission = await TryAcquireOperationAsync(ModuleOperationKind.EsimModification, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+            return new LogicalChannelEs10.ProfileStateResult(false, -2, $"操作被仲裁器拒绝：{admission.ErrorCode}");
+        await using var lease = admission.Lease;
+        if (es10.Channel <= 0)
+        {
+            var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
+            if (opened is null || opened <= 0)
+                return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
+        }
+        try
+        {
+            return await es10.SetNicknameAsync(iccid, nickname, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await es10.CloseAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task<bool> WaitForEsimProfileStateAsync(
+        LogicalChannelEs10 es10, string iccid, int expectedState, CancellationToken ct)
+    {
+        const int maxAttempts = 40;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (attempt > 0)
+                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+
+            var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
+            if (opened is null or <= 0)
+                continue;
+            try
+            {
+                var profiles = await es10.GetProfilesAsync(ct).ConfigureAwait(false);
+                var profile = profiles?.FirstOrDefault(item =>
+                    string.Equals(item.Iccid, iccid, StringComparison.Ordinal));
+                if (profile?.State == expectedState)
+                    return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // A card reset can leave the ISD-R briefly unavailable. Retry until the state is readable.
+            }
+            finally
+            {
+                await es10.CloseAsync().ConfigureAwait(false);
+            }
+        }
+        return false;
+    }
+
+    private static async Task<List<LogicalChannelEs10.NotificationMetadata>?> TryListEsimNotificationsAsync(
+        LogicalChannelEs10 es10, CancellationToken ct)
+    {
+        try { return await es10.ListNotificationsAsync(ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private static async Task<long?> TryGetFreeEsimNvramAsync(LogicalChannelEs10 es10, CancellationToken ct)
+    {
+        try { return await es10.GetFreeNvramBytesAsync(ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private static async Task<long?> ReadFreeEsimNvramWithRetryAsync(
+        LogicalChannelEs10 es10, int attempts, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            var bytes = await TryGetFreeEsimNvramAsync(es10, ct).ConfigureAwait(false);
+            if (bytes is > 0) return bytes;
+            if (attempt < attempts - 1)
+                await Task.Delay(TimeSpan.FromMilliseconds(300), ct).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    private static async Task<string?> HandleNewDeleteNotificationAsync(
+        LogicalChannelEs10 es10, long lastSequence, string iccid, CancellationToken ct)
+    {
+        LogicalChannelEs10.NotificationMetadata? notification = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var items = await TryListEsimNotificationsAsync(es10, ct).ConfigureAwait(false);
+            notification = items?
+                .Where(item => item.Event == 3 && item.SequenceNumber > lastSequence &&
+                               string.Equals(item.Iccid, iccid, StringComparison.Ordinal))
+                .OrderBy(item => item.SequenceNumber)
+                .FirstOrDefault();
+            if (notification is not null) break;
+            if (attempt < 2) await Task.Delay(TimeSpan.FromMilliseconds(300), ct).ConfigureAwait(false);
+        }
+        if (notification is null) return "删除通知未处理";
+
+        string? warning = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            warning = await es10.HandleNotificationAsync(notification.SequenceNumber, ct).ConfigureAwait(false);
+            if (warning is null) return null;
+            if (attempt < 2) await Task.Delay(TimeSpan.FromMilliseconds(300), ct).ConfigureAwait(false);
+        }
+        return warning;
+    }
+
+    private async Task<string?> ReadCurrentIccidAsync(CancellationToken ct)
+    {
+        var engine = _engine;
+        if (engine is null) return null;
+        AtResult result;
+        try
+        {
+            result = await engine.ExecuteAsync("AT+QCCID", TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+        if (!result.Succeeded) return null;
+        var line = result.LinesWithPrefix("+QCCID").FirstOrDefault();
+        var separator = line?.IndexOf(':') ?? -1;
+        return separator < 0 ? null : line![(separator + 1)..].Trim();
+    }
+
+    private void UpdateCurrentIccid(string? iccid)
+    {
+        Status.Iccid = iccid;
+        Status.UpdatedAt = DateTime.Now;
+        StatusUpdated?.Invoke(this, Status);
     }
 
     public Task<bool> SetCallMuteAsync(bool muted, CancellationToken ct = default) =>

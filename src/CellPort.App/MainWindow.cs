@@ -30,6 +30,8 @@ public sealed class MainWindow : Window
     private readonly Button _connectButton = new() { Name = "ConnectButton", Content = "连接模块", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Avalonia.Controls.Shapes.Ellipse _connectionDot = new() { Name = "ConnectionDot", Width = 8, Height = 8, Fill = Brushes.Gray, VerticalAlignment = VerticalAlignment.Center };
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer _callPollTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _smsPollTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly SmsForwarder _smsForwarder = new();
     private readonly CancellationTokenSource _forwardingCts = new();
     private CancellationTokenSource _lifetimeCts = new();
@@ -41,8 +43,10 @@ public sealed class MainWindow : Window
     private Task? _startupTask;
     private Task? _connectTask;
     private Task? _refreshTask;
+    private Task? _callPollTask;
+    private Task? _smsPollTask;
     private readonly HashSet<Task> _forwardTasks = [];
-    private readonly Dictionary<string, RadioButton> _navButtons = [];
+    private readonly Dictionary<string, Button> _navButtons = [];
     private string _currentPage = "Sms";
     private readonly System.Text.StringBuilder _connectLog = new();
     public static MainWindow? Current { get; private set; }
@@ -75,6 +79,16 @@ public sealed class MainWindow : Window
         AppSettings.SettingsChanged += OnSettingsChanged;
         _refreshTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(settings.RefreshIntervalSeconds, 1, 3600));
         _refreshTimer.Tick += (_, _) => { if (_refreshTask is not { IsCompleted: false } && _modem.IsConnected && !_closing) _refreshTask = RefreshAsync(); };
+        _callPollTimer.Tick += (_, _) =>
+        {
+            if (_callPollTask is not { IsCompleted: false } && _modem.IsConnected && !_closing)
+                _callPollTask = PollCallStateAsync();
+        };
+        _smsPollTimer.Tick += (_, _) =>
+        {
+            if (_smsPollTask is not { IsCompleted: false } && _modem.IsConnected && !_closing)
+                _smsPollTask = PollSmsInboxAsync();
+        };
         _connectButton.Click += (_, _) => { if (_connectTask is not { IsCompleted: false }) _connectTask = ConnectClickAsync(); };
         Closing += OnClosing;
         Opened += async (_, _) =>
@@ -82,7 +96,12 @@ public sealed class MainWindow : Window
             ShowPage("Sms");
             ApplyStartupPageFromArgs(_args);
             if (settings.AutoConnect) { _startupTask = TryAutoConnectAsync(); await _startupTask; }
-            if (!_closing) _refreshTimer.Start();
+            if (!_closing)
+            {
+                _refreshTimer.Start();
+                _callPollTimer.Start();
+                _smsPollTimer.Start();
+            }
         };
     }
 
@@ -98,7 +117,12 @@ public sealed class MainWindow : Window
         var navigation = new StackPanel { Spacing = 2 };
         foreach (var item in Navigation)
         {
-            var button = new RadioButton { Name = "Nav" + item.Tag, Content = item.Title, HorizontalContentAlignment = HorizontalAlignment.Left, Tag = item.Tag, Height = 38, GroupName = "Navigation", Padding = new Thickness(10, 6), Classes = { "nav-item" } };
+            var button = new Button
+            {
+                Name = "Nav" + item.Tag, Content = item.Title, HorizontalContentAlignment = HorizontalAlignment.Left,
+                HorizontalAlignment = HorizontalAlignment.Stretch, Tag = item.Tag, Height = 34, MinHeight = 34,
+                Padding = new Thickness(10, 5), Classes = { "nav-item" },
+            };
             button.Click += (_, _) => ShowPage(item.Tag);
             navigation.Children.Add(button);
             _navButtons[item.Tag] = button;
@@ -113,7 +137,7 @@ public sealed class MainWindow : Window
         sidebarFrame.Child = sidebar;
         Grid.SetColumn(sidebarFrame, 0); root.Children.Add(sidebarFrame);
         var body = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(20, 15, 20, 13) };
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(20, 9, 20, 8) };
         var titleStack = new StackPanel { Spacing = 2 };
         titleStack.Children.Add(_pageTitle); titleStack.Children.Add(_pageSubtitle);
         header.Children.Add(titleStack);
@@ -141,7 +165,11 @@ public sealed class MainWindow : Window
         _pageHost.Content = page;
         if (page is IModuleAware aware) aware.OnActivated(_modem);
         if (page is IModuleAware modulePage) modulePage.OnConnectionChanged(_modem.IsConnected);
-        if (_navButtons.TryGetValue(key, out var selected)) selected.IsChecked = true;
+        foreach (var (navTag, button) in _navButtons)
+        {
+            if (navTag == key) button.Classes.Add("selected");
+            else button.Classes.Remove("selected");
+        }
     }
 
     private static string? NormalizePage(string value) => Navigation.FirstOrDefault(x =>
@@ -177,6 +205,28 @@ public sealed class MainWindow : Window
         try { await _modem.RefreshStatusAsync(_lifetimeCts.Token); }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
         catch (Exception ex) { if (!_closing) AppLog.Warn($"状态刷新失败：{ex.Message}"); }
+    }
+
+    private async Task PollCallStateAsync()
+    {
+        try
+        {
+            if (_modem.Calls is { } calls)
+                await calls.RefreshCallSnapshotAsync(_lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+        catch (Exception ex) { if (!_closing) AppLog.Warn($"通话状态检查失败：{ex.Message}"); }
+    }
+
+    private async Task PollSmsInboxAsync()
+    {
+        try
+        {
+            if (_modem.Sms is { } sms)
+                await sms.SyncStoredAsync(_lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+        catch (Exception ex) { if (!_closing) AppLog.Warn($"短信收件箱检查失败：{ex.Message}"); }
     }
 
     private async Task ConnectClickAsync()
@@ -283,7 +333,7 @@ public sealed class MainWindow : Window
         e.Cancel = true;
         if (_closing) return;
         lock (_forwardTasks) _closing = true;
-        _refreshTimer.Stop(); AppSettings.SettingsChanged -= OnSettingsChanged;
+        _refreshTimer.Stop(); _callPollTimer.Stop(); _smsPollTimer.Stop(); AppSettings.SettingsChanged -= OnSettingsChanged;
         _lifetimeCts.Cancel(); _forwardingCts.Cancel(); UpdateSmsForwardingSubscription(false);
         DialogService.CancelOwned(this);
         try
@@ -293,6 +343,8 @@ public sealed class MainWindow : Window
             if (_startupTask is not null) active.Add(_startupTask);
             if (_connectTask is not null) active.Add(_connectTask);
             if (_refreshTask is not null) active.Add(_refreshTask);
+            if (_callPollTask is not null) active.Add(_callPollTask);
+            if (_smsPollTask is not null) active.Add(_smsPollTask);
             lock (_forwardTasks) active.AddRange(_forwardTasks);
             try { await Task.WhenAll(active); } catch (OperationCanceledException) { } catch (Exception ex) { AppLog.Error("等待后台任务结束失败", ex); }
             foreach (var page in _pages.Values)

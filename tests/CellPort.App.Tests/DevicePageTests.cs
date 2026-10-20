@@ -232,6 +232,8 @@ public sealed class DevicePageTests
         if (control is TextBlock textBlock) yield return textBlock;
         if (control is ContentControl { Content: Control content })
             foreach (var descendant in DescendantTextBlocks(content)) yield return descendant;
+        if (control is Decorator { Child: Control decoratorChild })
+            foreach (var descendant in DescendantTextBlocks(decoratorChild)) yield return descendant;
         if (control is Panel panel)
             foreach (var child in panel.Children)
                 foreach (var descendant in DescendantTextBlocks(child)) yield return descendant;
