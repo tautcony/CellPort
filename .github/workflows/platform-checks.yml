@@ -59,6 +59,13 @@ jobs:
           fi
           echo "$(dirname "$brew_bin")" >> "$GITHUB_PATH"
           "$brew_bin" install libusb
+          libusb_prefix="$($brew_bin --prefix libusb)"
+          libusb_cellar="$($brew_bin --cellar libusb)"
+          echo "LIBUSB_PREFIX=$libusb_prefix" >> "$GITHUB_ENV"
+          echo "LIBUSB_CELLAR=$libusb_cellar" >> "$GITHUB_ENV"
+          echo "libusb prefix: $libusb_prefix"
+          echo "libusb cellar: $libusb_cellar"
+          find -L "$libusb_cellar" -type f \( -name 'libusb-1.0.dylib' -o -name 'libusb-1.0.0.dylib' \) -exec sh -c 'for path do printf "%s: " "$path"; lipo -archs "$path" 2>/dev/null || echo unknown; done' sh {} +
       - name: Package self-contained app
         run: bash scripts/publish-mac.sh
       - name: Cross-publish canonical Windows app
