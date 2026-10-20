@@ -15,8 +15,6 @@ public sealed record PhonebookEntry(int Index, string Number, string Name);
 /// </summary>
 public sealed class PhonebookService(AtEngine engine)
 {
-    private readonly AtEngine _engine = engine;
-
     /// <summary>SIM 电话簿容量信息。</summary>
     /// <param name="MaxNumberLength">号码最大长度（字符）。</param>
     /// <param name="MaxNameLength">名字最大长度（字符）。</param>
@@ -137,7 +135,7 @@ public sealed class PhonebookService(AtEngine engine)
     {
         try
         {
-            var r = await _engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
+            var r = await engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
             return r.Succeeded ? r : null;
         }
         catch

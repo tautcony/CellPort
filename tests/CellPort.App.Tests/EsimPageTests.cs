@@ -5,7 +5,6 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
 using CellPort.App.Views;
-using CellPort.Core.At;
 using CellPort.Core.Models;
 using CellPort.Core.Services;
 using CellPort.Core.Transport;
@@ -28,7 +27,7 @@ public sealed class EsimPageTests
         await rig.Page.WaitForActiveOperationsForTestAsync();
 
         Assert.Equal(1, confirmations);
-        Assert.DoesNotContain(rig.Channel.Commands, command => IsProfileWrite(command));
+        Assert.DoesNotContain(rig.Channel.Commands, IsProfileWrite);
     }
 
     [AvaloniaFact]
@@ -59,7 +58,7 @@ public sealed class EsimPageTests
         await rig.Page.WaitForActiveOperationsForTestAsync();
 
         Assert.Equal(1, confirmations);
-        Assert.DoesNotContain(rig.Channel.Commands, command => IsProfileWrite(command));
+        Assert.DoesNotContain(rig.Channel.Commands, IsProfileWrite);
     }
 
     [AvaloniaFact]
@@ -223,12 +222,11 @@ public sealed class EsimPageTests
         Assert.Equal(EuiccCapability.Ready, result.Capability);
         Assert.Equal(LogicalChannelEs10.StandardIsdrAidHex, rig.Modem.Info.Es10?.IsdrAidHex);
         Assert.Equal(
-            new[]
-            {
+            [
                 "AT+CCHO=\"A06573746B6D65FFFF4953442D522030\"",
                 "AT+CCHO=\"A06573746B6D65FFFF4953442D522031\"",
-                $"AT+CCHO=\"{LogicalChannelEs10.StandardIsdrAidHex}\"",
-            },
+                $"AT+CCHO=\"{LogicalChannelEs10.StandardIsdrAidHex}\""
+            ],
             rig.Channel.Commands.Where(command => command.StartsWith("AT+CCHO=\"", StringComparison.Ordinal)));
     }
 
@@ -378,7 +376,7 @@ public sealed class EsimPageTests
     private sealed class TestChannel(int profileState, int profileClass, string? nickname, string activeIccid) : IAtChannel
     {
         public const string ProfileIccid = "89690012345678902143";
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
         private byte[] _reply = [];
         private bool _profileDeleted;
         public int ProfileState { get; set; } = profileState;
@@ -528,7 +526,7 @@ public sealed class EsimPageTests
 
         private static string BuildNotificationMetadata()
         {
-            var address = Convert.ToHexString(Encoding.UTF8.GetBytes("example.com"));
+            var address = Convert.ToHexString("example.com"u8.ToArray());
             return Tlv("BF2F", Tlv("8001", "07") + Tlv("8102", "0410") + Tlv("0C0B", address) +
                                  Tlv("5A0A", "98960021436587091234"));
         }

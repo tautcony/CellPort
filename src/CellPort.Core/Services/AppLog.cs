@@ -8,7 +8,7 @@ namespace CellPort.Core.Services;
 /// </summary>
 public static class AppLog
 {
-    private static readonly object Lock = new();
+    private static readonly Lock Lock = new();
     private static string? _logDir;
     private static bool _initialized;
 
@@ -31,7 +31,7 @@ public static class AppLog
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "CellPort",
                     "logs");
-                System.IO.Directory.CreateDirectory(_logDir);
+                Directory.CreateDirectory(_logDir);
                 Cleanup(_logDir, 7);
             }
             catch
@@ -79,7 +79,7 @@ public static class AppLog
         try
         {
             var cutoff = DateTime.Now.AddDays(-keepDays);
-            foreach (var f in System.IO.Directory.GetFiles(dir, "cellport-*.log"))
+            foreach (var f in Directory.GetFiles(dir, "cellport-*.log"))
             {
                 if (File.GetLastWriteTime(f) < cutoff)
                 {

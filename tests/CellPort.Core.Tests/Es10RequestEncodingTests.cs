@@ -106,7 +106,7 @@ public class Es10RequestEncodingTests
     [Fact]
     public void ProfileTextDecodesUtf8WithoutLoss()
     {
-        var encoded = System.Text.Encoding.UTF8.GetBytes("旅行卡");
+        var encoded = "旅行卡"u8.ToArray();
 
         Assert.Equal("旅行卡", LogicalChannelEs10.DecodeProfileText(encoded));
     }

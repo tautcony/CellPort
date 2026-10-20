@@ -62,7 +62,7 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
     ];
 
     private readonly SemaphoreSlim _moduleOperation = new(1, 1);
-    private readonly object _stateGate = new();
+    private readonly Lock _stateGate = new();
     private readonly TimeProvider _timeProvider;
     private bool _audioSessionOwned;
     private bool _audioPrepareInFlight;
@@ -111,7 +111,7 @@ public sealed class DeviceOperationCoordinator : IAsyncDisposable, IModuleOperat
         ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (request.Kind == DeviceOperationKind.RawConsoleCommand && request.RawCommandIsReadOnly)
+        if (request is { Kind: DeviceOperationKind.RawConsoleCommand, RawCommandIsReadOnly: true })
             return new DeviceOperationAcquireResult(new DeviceOperationLease(this, request.Kind, ownsSemaphore: false), null);
         if (!MutatingOperations.Contains(request.Kind))
             return new DeviceOperationAcquireResult(new DeviceOperationLease(this, request.Kind, ownsSemaphore: false), null);

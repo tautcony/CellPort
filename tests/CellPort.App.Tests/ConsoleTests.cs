@@ -21,7 +21,7 @@ public sealed class ConsoleTests
             page.RunButtonForTests().RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
             var stopAt = DateTime.UtcNow.AddSeconds(3);
             while (page.History.Count == 0 && DateTime.UtcNow < stopAt) await Task.Delay(10);
-            Assert.Equal(new[] { "AT+CSQ" }, page.History);
+            Assert.Equal(["AT+CSQ"], page.History);
             Assert.Contains("AT+CSQ", channel.Commands);
             Assert.Contains("AT+CSQ", page.CommandOutput.Text);
         }

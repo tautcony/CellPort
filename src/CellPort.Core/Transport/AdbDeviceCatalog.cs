@@ -87,7 +87,7 @@ public sealed class ModuleSessionLease
 /// <summary>Owns identity generations and invalidates late results after re-enumeration or reboot.</summary>
 public sealed class ModuleIdentitySession
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private long _generation;
     private ModuleSessionLease? _current;
 
@@ -195,7 +195,7 @@ public sealed class ModuleIdentitySession
 /// </summary>
 public sealed class AdbDeviceCatalog
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private ImmutableArray<AdbDeviceCandidate> _devices = [];
     private long _generation;
 
@@ -214,7 +214,7 @@ public sealed class AdbDeviceCatalog
     public long Update(IEnumerable<AdbDeviceCandidate> devices)
     {
         ArgumentNullException.ThrowIfNull(devices);
-        var candidates = MarkDuplicateSerialsUnreliable(devices.ToArray());
+        var candidates = MarkDuplicateSerialsUnreliable([.. devices]);
         lock (_gate)
         {
             _generation = checked(_generation + 1);

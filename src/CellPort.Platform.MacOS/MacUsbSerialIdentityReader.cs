@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using CellPort.Core.Transport;
 
 namespace CellPort.Platform.MacOS;
 
@@ -45,8 +44,7 @@ internal static class MacUsbSerialIdentityReader
         if (!OperatingSystem.IsMacOS()) return result;
         var matching = IOServiceMatching("IOUSBHostDevice");
         if (matching == IntPtr.Zero) return result;
-        uint iterator = 0;
-        if (IOServiceGetMatchingServices(0, matching, out iterator) != 0 || iterator == 0) return result;
+        if (IOServiceGetMatchingServices(0, matching, out var iterator) != 0 || iterator == 0) return result;
         try
         {
             while (IOIteratorNext(iterator) is var entry && entry != 0)
@@ -74,8 +72,7 @@ internal static class MacUsbSerialIdentityReader
         var matching = IOServiceMatching("IOSerialBSDClient");
         if (matching == IntPtr.Zero) return;
 
-        uint iterator = 0;
-        var status = IOServiceGetMatchingServices(0, matching, out iterator);
+        var status = IOServiceGetMatchingServices(0, matching, out var iterator);
         if (status != 0 || iterator == 0) return;
 
         try

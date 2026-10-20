@@ -29,7 +29,7 @@ public sealed class AdbDeviceCatalogTests
         Assert.False(selected.Selection.SerialReliable);
         Assert.Null(selected.Selection.Serial);
         Assert.True(catalog.IsCurrent(selected.Selection));
-        Assert.Equal(new[] { "-t", "42", "shell", "id" },
+        Assert.Equal(["-t", "42", "shell", "id"],
             AdbTransportClient.BuildArguments(selected.Selection, ["shell", "id"]));
     }
 
@@ -95,7 +95,7 @@ public sealed class AdbDeviceCatalogTests
         var result = await client.RunAsync(selection, ["exec-out", "inspect"], TimeSpan.FromMilliseconds(60));
 
         Assert.Equal(AdbCommandStatus.TimedOut, result.Status);
-        Assert.Equal(new[] { "-t", "41", "exec-out", "inspect" }, runner.Arguments);
+        Assert.Equal(["-t", "41", "exec-out", "inspect"], runner.Arguments);
         Assert.True(runner.CancellationObserved);
     }
 
@@ -125,7 +125,7 @@ public sealed class AdbDeviceCatalogTests
             IReadOnlyList<string> arguments,
             CancellationToken cancellationToken)
         {
-            Arguments = arguments.ToArray();
+            Arguments = [.. arguments];
             try
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);

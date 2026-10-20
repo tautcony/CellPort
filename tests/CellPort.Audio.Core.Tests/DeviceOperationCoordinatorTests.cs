@@ -140,7 +140,7 @@ public sealed class DeviceOperationCoordinatorTests
             Assert.Equal(AudioPrepareCallImpact.MustConvergeLocally, coordinator.NotifyCallSnapshot(incoming));
             Assert.False(lease.OperationCancellationToken.IsCancellationRequested);
             lease.CommitAudioSessionOwnership();
-            lease.Dispose();
+            await lease.DisposeAsync();
             Assert.True(coordinator.AudioSessionOwned);
         }
 

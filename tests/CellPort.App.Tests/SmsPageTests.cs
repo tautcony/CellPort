@@ -148,7 +148,7 @@ public sealed class SmsPageTests
         var json = new MemoryStream();
         try
         {
-            var prior = Encoding.UTF8.GetBytes("old file content that is longer than the export");
+            var prior = "old file content that is longer than the export"u8.ToArray();
             csv.Write(prior); json.Write(prior);
             page.SetInboxSnapshotForTest([new SmsMessage
             {
@@ -177,7 +177,7 @@ public sealed class SmsPageTests
             Assert.DoesNotContain("old file content", jsonText);
 
             var untouched = new MemoryStream();
-            untouched.Write(Encoding.UTF8.GetBytes("leave this file untouched"));
+            untouched.Write("leave this file untouched"u8);
             var beforeCancel = untouched.ToArray();
             page.ExportPickerOverride = _ => Task.FromResult<(string Name, Stream Stream)?>(null);
             page.ExportCsvButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

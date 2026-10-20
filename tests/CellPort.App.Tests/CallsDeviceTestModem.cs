@@ -14,7 +14,7 @@ internal sealed class CallsDeviceTestProvider(CallsDeviceTestChannel channel) : 
 
 internal sealed class CallsDeviceTestChannel : IAtChannel
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private byte[] _reply = [];
     public string Description => "synthetic UI-test channel";
     public AtChannelKind Kind => AtChannelKind.SerialPort;
@@ -34,8 +34,8 @@ internal sealed class CallsDeviceTestChannel : IAtChannel
             Commands.Enqueue(command);
             var payload = command switch
             {
-                var c when c.StartsWith("AT+CMGS=", StringComparison.Ordinal) => "> \r\n",
-                var c when c.EndsWith('\u001A') => "+CMGS: 1\r\n",
+                _ when command.StartsWith("AT+CMGS=", StringComparison.Ordinal) => "> \r\n",
+                _ when command.EndsWith('\u001A') => "+CMGS: 1\r\n",
                 "AT+CLCC" when ActiveCall => "+CLCC: 1,0,0,0,0,\"+15551234\",145\r\n",
                 "AT+CLCC" when IncomingCall => "+CLCC: 2,1,4,0,0,\"+15557654321\",145\r\n",
                 "AT+CLCC" => string.Empty,

@@ -41,7 +41,7 @@ public sealed class SettingsPage : UserControl, IModuleAware, IDisposable, IAsyn
         LoadSettings();
     }
 
-    public void OnActivated(CellPort.Core.Services.ModemManager modem) { }
+    public void OnActivated(ModemManager modem) { }
     public void OnConnectionChanged(bool connected) { }
     private static Control Label(string label, Control control) => new StackPanel { Spacing = 5, Children = { new TextBlock { Text = label }, control } };
     private void LoadSettings()

@@ -35,7 +35,7 @@ public sealed class AudioFrameBufferTests
         Assert.Equal(new float[] { 3, 4, 5 }, output.ToArray());
         Assert.Equal(2, buffer.FramesDropped);
 
-        ReadOnlySpan<float> tail = stackalloc float[] { 6, 7 };
+        ReadOnlySpan<float> tail = [6, 7];
         var before = GC.GetAllocatedBytesForCurrentThread();
         buffer.Write(tail);
         buffer.Read(output[..2]);

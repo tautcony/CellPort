@@ -10,7 +10,7 @@ public sealed class CallStateFreshnessGate : IDisposable
 {
     public static readonly TimeSpan MaximumSnapshotAge = TimeSpan.FromSeconds(3);
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly TimeProvider _timeProvider;
     private readonly ITimer _timer;
     private long _sampledAtTimestamp;

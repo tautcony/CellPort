@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 
 namespace CellPort.Core.At;
@@ -101,7 +100,7 @@ public static class SmsPduParser
             var isSubmit = messageType == 0x01;
 
             // DELIVER、SUBMIT 都包含对端地址；SUBMIT 前面另有一个 TP-MR 字节。
-            if (messageType == 0x02 || messageType == 0x03)
+            if (messageType is 0x02 or 0x03)
             {
                 return null; // STATUS-REPORT 与保留类型暂不展开
             }
@@ -169,7 +168,7 @@ public static class SmsPduParser
         ref int? concatTotal,
         ref int? concatPart)
     {
-        int i = 0;
+        var i = 0;
         while (i + 1 < udh.Length)
         {
             var iei = udh[i];
@@ -234,23 +233,22 @@ public static class SmsPduParser
         var addrLen = reader.ReadByte();
         typeOfAddress = reader.ReadByte();
         // TP-OA/TP-DA length counts address digits; TOA is a separate octet.
-        var digitCount = addrLen;
-        if (digitCount <= 0)
+        if (addrLen <= 0)
         {
             return string.Empty;
         }
 
-        var byteCount = (digitCount + 1) / 2;
+        var byteCount = (addrLen + 1) / 2;
         var raw = reader.ReadBytes(byteCount);
 
-        var sb = new StringBuilder(digitCount);
+        var sb = new StringBuilder(addrLen);
         foreach (var b in raw)
         {
             sb.Append(NibbleToChar(b & 0x0F));
             sb.Append(NibbleToChar((b >> 4) & 0x0F));
         }
 
-        var digits = sb.ToString().TrimEnd('F', 'f')[..Math.Min(digitCount, sb.Length)];
+        var digits = sb.ToString().TrimEnd('F', 'f')[..Math.Min(addrLen, sb.Length)];
 
         // 0x91 = 国际格式
         var isInternational = (typeOfAddress & 0x70) == 0x10;
@@ -274,7 +272,6 @@ public static class SmsPduParser
         try
         {
             var raw = reader.ReadBytes(7);
-            int Dec(int b) => ((b & 0x0F) * 10) + ((b >> 4) & 0x0F);
 
             var year = Dec(raw[0]);
             var month = Dec(raw[1]);
@@ -304,6 +301,8 @@ public static class SmsPduParser
         {
             return null;
         }
+
+        int Dec(int b) => ((b & 0x0F) * 10) + ((b >> 4) & 0x0F);
     }
 
     /// <summary>

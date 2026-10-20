@@ -6,7 +6,6 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using CellPort.App.Services;
-using CellPort.Audio.Core.Models;
 using CellPort.Audio.Core.Resources;
 using CellPort.Audio.Core.Services;
 using CellPort.Core.Services;
@@ -348,7 +347,7 @@ public sealed class CallsPage : UserControl, IModuleAware, IDisposable, IAsyncDi
     {
         Dispose();
         Task[] pending;
-        lock (_operations) pending = _operations.ToArray();
+        lock (_operations) pending = [.. _operations];
         try { await Task.WhenAll(pending); }
         finally { _callCommandGate.Dispose(); _lifetime.Dispose(); }
     }

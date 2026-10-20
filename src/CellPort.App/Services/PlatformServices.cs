@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using Avalonia.Controls;
 using CellPort.Core.Transport;
-using CellPort.Core.Services;
-using CellPort.Transport.Serial;
 #if WINDOWS
 using CellPort.Platform.Windows;
 #else

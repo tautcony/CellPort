@@ -9,7 +9,6 @@ namespace CellPort.Core.Services;
 /// </summary>
 public sealed class DeviceInfoService(AtEngine engine)
 {
-    private readonly AtEngine _engine = engine;
     private string? _preferredIsdrAidHex;
 
     public HttpClient? EsimNotificationHttpClient { get; set; }
@@ -149,7 +148,7 @@ public sealed class DeviceInfoService(AtEngine engine)
     public async Task<EuiccProbeResult> ProbeEuiccAsync(CancellationToken ct = default)
     {
         // ---------- 路径一：逻辑通道（CCHO / CGLA）----------
-        var es10 = new LogicalChannelEs10(_engine, EsimNotificationHttpClient);
+        var es10 = new LogicalChannelEs10(engine, EsimNotificationHttpClient);
         Es10 = null;
 
         bool supported;
@@ -278,7 +277,7 @@ public sealed class DeviceInfoService(AtEngine engine)
     {
         try
         {
-            var r = await _engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
+            var r = await engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
             return r.Succeeded ? r : null;
         }
         catch

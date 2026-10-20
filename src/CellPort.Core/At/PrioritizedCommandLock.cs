@@ -4,7 +4,7 @@ namespace CellPort.Core.At;
 internal sealed class PrioritizedCommandLock : IDisposable
 {
     private const int MaximumQueuedCommands = 256;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly SortedSet<Waiter> _waiters = new(WaiterComparer.Instance);
     private bool _held;
     private bool _disposed;

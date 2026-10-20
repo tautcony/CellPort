@@ -82,15 +82,13 @@ public sealed record CallCommandOutcome(
 /// <summary>
 /// 语音通话服务。通过 AT 指令控制拨号、接听、挂断，并解析 URC 通话状态。
 /// </summary>
-public sealed class CallService
+public sealed class CallService(AtEngine engine, CallTracker? tracker = null)
 {
-    private readonly AtEngine _engine;
-    private readonly CallTracker _tracker;
+    private readonly AtEngine _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+    private readonly CallTracker _tracker = tracker ?? new CallTracker();
     private readonly List<CallRecord> _history = [];
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
-    private CallState _state = CallState.Idle;
-    private string? _peerNumber;
     private CallKey? _currentCallKey;
     private CallDirection? _currentDirection;
     private DateTime _callCreatedAt;
@@ -99,12 +97,6 @@ public sealed class CallService
     private int _refreshRequested;
     private int _refreshWorkerStarted;
 
-    public CallService(AtEngine engine, CallTracker? tracker = null)
-    {
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
-        _tracker = tracker ?? new CallTracker();
-    }
-
     /// <summary>通话状态变化。</summary>
     public event EventHandler<CallState>? StateChanged;
 
@@ -112,10 +104,10 @@ public sealed class CallService
     public event EventHandler<string>? IncomingCall;
 
     /// <summary>当前状态。</summary>
-    public CallState State => _state;
+    public CallState State { get; private set; } = CallState.Idle;
 
     /// <summary>当前对端号码。</summary>
-    public string? PeerNumber => _peerNumber;
+    public string? PeerNumber { get; private set; }
 
     /// <summary>最近一次完整或未知的 CLCC 快照。</summary>
     public CallSnapshot CurrentSnapshot => _tracker.Current;
@@ -191,7 +183,7 @@ public sealed class CallService
         }
 
         SetState(CallState.Dialing);
-        _peerNumber = normalized;
+        PeerNumber = normalized;
 
         // 语音呼叫需带 ";"
         var r = await SafeResultAsync($"ATD{normalized};", ct, TimeSpan.FromSeconds(15)).ConfigureAwait(false);
@@ -272,9 +264,9 @@ public sealed class CallService
             var m = Regex.Match(line, "\"([^\"]+)\"");
             if (m.Success)
             {
-                _peerNumber = m.Groups[1].Value;
+                PeerNumber = m.Groups[1].Value;
                 SetState(CallState.Ringing);
-                IncomingCall?.Invoke(this, _peerNumber);
+                IncomingCall?.Invoke(this, PeerNumber);
             }
             RequestSnapshotRefresh();
             return true;
@@ -318,11 +310,11 @@ public sealed class CallService
 
     private void SetState(CallState state)
     {
-        if (_state == state)
+        if (State == state)
         {
             return;
         }
-        _state = state;
+        State = state;
         StateChanged?.Invoke(this, state);
     }
 
@@ -373,11 +365,11 @@ public sealed class CallService
             _currentDirection = call.Key.Direction;
             _callCreatedAt = DateTime.Now;
             _activeStartedAt = null;
-            _peerNumber = call.Entry.Number ?? _peerNumber;
+            PeerNumber = call.Entry.Number ?? PeerNumber;
         }
         else if (!string.IsNullOrEmpty(call.Entry.Number))
         {
-            _peerNumber = call.Entry.Number;
+            PeerNumber = call.Entry.Number;
         }
 
         switch (call.State)
@@ -418,7 +410,7 @@ public sealed class CallService
         {
             _history.Add(new CallRecord
             {
-                Number = _peerNumber ?? string.Empty,
+                Number = PeerNumber ?? string.Empty,
                 Direction = _currentDirection ?? _currentCallKey.Direction,
                 Timestamp = _callCreatedAt,
                 Duration = duration,
@@ -427,7 +419,7 @@ public sealed class CallService
 
         _currentCallKey = null;
         _currentDirection = null;
-        _peerNumber = null;
+        PeerNumber = null;
         _activeStartedAt = null;
     }
 

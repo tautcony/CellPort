@@ -22,7 +22,7 @@ public sealed class WindowsModuleIdentityResolverTests
 
         Assert.Equal(WindowsModuleResolutionStatus.Unique, selected.Status);
         Assert.Equal(selectedContainer, selected.Module!.ContainerId);
-        Assert.Equal("USB\\VID_2CA3&PID_4006\\PORT_A", selected.Module.ParentInstanceId);
+        Assert.Equal(@"USB\VID_2CA3&PID_4006\PORT_A", selected.Module.ParentInstanceId);
         Assert.Contains(selected.Module.LocationPaths, path => path.Contains("USB(2)", StringComparison.Ordinal));
         Assert.Single(selected.Module.AtControlInterfaces);
         Assert.Equal(3, selected.Module.AtControlInterfaces[0].InterfaceNumber);
@@ -32,11 +32,11 @@ public sealed class WindowsModuleIdentityResolverTests
     public void MissingContainerParentOrLocationFailsClosed()
     {
         var incomplete = new WindowsPnpDeviceNode(
-            "USB\\VID_2CA3&PID_4006&MI_11\\DEVICE",
+            @"USB\VID_2CA3&PID_4006&MI_11\DEVICE",
             null,
             null,
             ImmutableArray<string>.Empty,
-            ["USB\\VID_2CA3&PID_4006&MI_11"],
+            [@"USB\VID_2CA3&PID_4006&MI_11"],
             "AT Control Port");
 
         var result = WindowsModuleIdentityResolver.Resolve([incomplete]);
@@ -49,11 +49,11 @@ public sealed class WindowsModuleIdentityResolverTests
     public void InterfaceNumberIsObservedButNeverUsedAsTheControlRole()
     {
         var node = new WindowsPnpDeviceNode(
-            "USB\\VID_2CA3&PID_4006&MI_09\\DEVICE",
-            "USB\\VID_2CA3&PID_4006\\PARENT",
+            @"USB\VID_2CA3&PID_4006&MI_09\DEVICE",
+            @"USB\VID_2CA3&PID_4006\PARENT",
             Guid.Parse("2f123456-1111-2222-3333-000000000009"),
             ["PCIROOT(0)#USBROOT(0)#USB(9)#USBMI(09)"],
-            ["USB\\VID_2CA3&PID_4006&MI_09"],
+            [@"USB\VID_2CA3&PID_4006&MI_09"],
             "AC Interface");
 
         var result = WindowsModuleIdentityResolver.Resolve([node]);
@@ -69,13 +69,16 @@ public sealed class WindowsModuleIdentityResolverTests
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "windows-dual-module-same-name.json");
         using var document = JsonDocument.Parse(File.ReadAllText(path));
-        return document.RootElement.GetProperty("deviceNodes").EnumerateArray().Select(node =>
-            new WindowsPnpDeviceNode(
-                node.GetProperty("instanceId").GetString()!,
-                node.GetProperty("parentInstanceId").GetString(),
-                node.GetProperty("containerId").GetGuid(),
-                [.. node.GetProperty("locationPaths").EnumerateArray().Select(item => item.GetString()!)],
-                [.. node.GetProperty("hardwareIds").EnumerateArray().Select(item => item.GetString()!)],
-                node.GetProperty("friendlyName").GetString())).ToArray();
+        return
+        [
+            .. document.RootElement.GetProperty("deviceNodes").EnumerateArray().Select(node =>
+                new WindowsPnpDeviceNode(
+                    node.GetProperty("instanceId").GetString()!,
+                    node.GetProperty("parentInstanceId").GetString(),
+                    node.GetProperty("containerId").GetGuid(),
+                    [.. node.GetProperty("locationPaths").EnumerateArray().Select(item => item.GetString()!)],
+                    [.. node.GetProperty("hardwareIds").EnumerateArray().Select(item => item.GetString()!)],
+                    node.GetProperty("friendlyName").GetString()))
+        ];
     }
 }

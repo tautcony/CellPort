@@ -14,9 +14,7 @@ public enum ModuleOperationKind
     RawConsoleCommand,
 }
 
-public interface IModuleOperationLease : IAsyncDisposable
-{
-}
+public interface IModuleOperationLease : IAsyncDisposable;
 
 public sealed record ModuleOperationAdmissionResult(
     bool Allowed,

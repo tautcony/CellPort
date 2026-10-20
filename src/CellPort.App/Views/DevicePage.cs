@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Threading;
 using CellPort.App.Services;
 using CellPort.Core.Models;
 using CellPort.Core.Services;
@@ -427,7 +426,7 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
     {
         Dispose();
         Task[] pending;
-        lock (_operations) pending = _operations.ToArray();
+        lock (_operations) pending = [.. _operations];
         try { await Task.WhenAll(pending); }
         finally { _lifetime.Dispose(); }
     }

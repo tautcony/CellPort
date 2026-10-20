@@ -27,7 +27,7 @@ public sealed class AtEnginePriorityTests
 
         var results = await Task.WhenAll(running, background, callState, urgent);
 
-        Assert.Equal(new[] { "AT+LONG", "AT+URGENT", "AT+CLCC", "AT+BACKGROUND" }, channel.Commands);
+        Assert.Equal(["AT+LONG", "AT+URGENT", "AT+CLCC", "AT+BACKGROUND"], channel.Commands);
         Assert.All(results,
             result => Assert.Equal(AtCompletionStatus.Ok, result.Completion));
     }
@@ -50,7 +50,7 @@ public sealed class AtEnginePriorityTests
             TimeSpan.FromSeconds(2));
         await Task.WhenAll(running, after);
         Assert.DoesNotContain("AT+EXPIRED", channel.Commands);
-        Assert.Equal(new[] { "AT+LONG", "AT+AFTER" }, channel.Commands);
+        Assert.Equal(["AT+LONG", "AT+AFTER"], channel.Commands);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public sealed class AtEnginePriorityTests
 
         Assert.Equal(AtCompletionStatus.Ok, first.Completion);
         Assert.Equal(AtCompletionStatus.Ok, second.Completion);
-        Assert.Equal(new[] { "AT+LONG", "AT+FOLLOWUP" }, channel.Commands);
+        Assert.Equal(["AT+LONG", "AT+FOLLOWUP"], channel.Commands);
     }
 
     private sealed class ScheduledReplyChannel(
@@ -88,7 +88,7 @@ public sealed class AtEnginePriorityTests
         public string Description => "scheduled test channel";
         public AtChannelKind Kind => AtChannelKind.SerialPort;
         public bool IsOpen => true;
-        public IReadOnlyList<string> Commands => _commands.ToArray();
+        public IReadOnlyList<string> Commands => [.. _commands];
 
         public async Task WaitUntilWrittenAsync(string command)
         {

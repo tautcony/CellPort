@@ -9,8 +9,6 @@ namespace CellPort.Core.Services;
 /// </summary>
 public sealed class CusdService(AtEngine engine)
 {
-    private readonly AtEngine _engine = engine;
-
     /// <summary>一次 USSD 交互的结果。</summary>
     /// <param name="Ok">模块是否给出可用文本响应。</param>
     /// <param name="Text">解码后的文本（GSM 7-bit / UCS2 自动识别）。</param>
@@ -34,7 +32,7 @@ public sealed class CusdService(AtEngine engine)
         AtResult? r;
         try
         {
-            r = await _engine.ExecuteAsync(
+            r = await engine.ExecuteAsync(
                 $@"AT+CUSD=1,""{code}"",15", AtEngine.LongTimeout, ct).ConfigureAwait(false);
         }
         catch (Exception ex)

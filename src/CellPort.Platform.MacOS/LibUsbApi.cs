@@ -112,7 +112,7 @@ internal sealed class NativeLibUsbApi : ILibUsbApi
         var ports = new byte[8];
         var count = Native.libusb_get_port_numbers(device, ports, ports.Length);
         if (count <= 0) return null;
-        uint location = (uint)bus << 24;
+        var location = (uint)bus << 24;
         for (var i = 0; i < count && i < 4; i++) location |= (uint)ports[i] << (20 - i * 4);
         return location;
     }

@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
 using CellPort.Core.Transport;
-using CellPort.App;
 using CellPort.App.Services;
 using CellPort.App.Views;
 

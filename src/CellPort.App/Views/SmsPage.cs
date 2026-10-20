@@ -93,13 +93,13 @@ public sealed class SmsPage : UserControl, IModuleAware, IDisposable, IAsyncDisp
         Content = layout;
 
         ThreadList.SelectionChanged += OnThreadSelected;
-        SendButton.Click += async (_, _) => await TrackAsync(() => SendAsync());
-        RefreshButton.Click += async (_, _) => await TrackAsync(() => RefreshAsync());
-        BodyBox.KeyDown += async (_, e) => { if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { e.Handled = true; await TrackAsync(() => SendAsync()); } };
+        SendButton.Click += async (_, _) => await TrackAsync(SendAsync);
+        RefreshButton.Click += async (_, _) => await TrackAsync(RefreshAsync);
+        BodyBox.KeyDown += async (_, e) => { if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { e.Handled = true; await TrackAsync(SendAsync); } };
         ExportCsvButton.Click += async (_, _) => await TrackAsync(() => ExportAsync("csv"));
         ExportJsonButton.Click += async (_, _) => await TrackAsync(() => ExportAsync("json"));
         fresh.Click += (_, _) => NewSms();
-        CallButton.Click += async (_, _) => await TrackAsync(() => DialAsync());
+        CallButton.Click += async (_, _) => await TrackAsync(DialAsync);
         AppSettings.SettingsChanged += OnSettingsChanged;
     }
 

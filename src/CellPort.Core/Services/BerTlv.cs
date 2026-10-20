@@ -110,11 +110,6 @@ public static class BerTlv
     /// <summary>把 value 当作无符号大端整数（用于 9F70 状态、95 类别等短枚举）。</summary>
     public static long ToLong(IReadOnlyList<byte> value)
     {
-        long v = 0;
-        for (var i = 0; i < value.Count; i++)
-        {
-            v = (v << 8) | value[i];
-        }
-        return v;
+        return value.Aggregate<byte, long>(0, (current, t) => (current << 8) | t);
     }
 }

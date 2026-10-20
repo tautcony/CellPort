@@ -17,7 +17,6 @@ public sealed class ModemManager : IAsyncDisposable
         _channels = channels ?? throw new ArgumentNullException(nameof(channels));
     }
 
-    private AtEngine? _engine;
     private CancellationTokenSource? _pumpCts;
     private Task? _pumpTask;
 
@@ -74,7 +73,7 @@ public sealed class ModemManager : IAsyncDisposable
     }
 
     /// <summary>当前是否已连接。</summary>
-    public bool IsConnected => _engine?.Channel.IsOpen == true;
+    public bool IsConnected => Engine?.Channel.IsOpen == true;
 
     /// <summary>当前状态快照。</summary>
     public DeviceStatus Status { get; private set; } = new();
@@ -101,13 +100,13 @@ public sealed class ModemManager : IAsyncDisposable
     public PhonebookService? Phonebook { get; private set; }
 
     /// <summary>当前 AT 通道描述。</summary>
-    public string ChannelDescription => _engine?.Channel.Description ?? "未连接";
+    public string ChannelDescription => Engine?.Channel.Description ?? "未连接";
 
     /// <summary>
     /// 当前 AT 引擎。供诊断工具直接构造通道级客户端（如 LogicalChannelEs10）；
     /// 未连接时为 null。
     /// </summary>
-    public AtEngine? Engine => _engine;
+    public AtEngine? Engine { get; private set; }
 
     /// <summary>
     /// 连接模块。按 UsbDirect → SerialPort 的顺序尝试。
@@ -249,7 +248,7 @@ public sealed class ModemManager : IAsyncDisposable
         }
         Trace("      AT 响应正常。");
 
-        _engine = engine;
+        Engine = engine;
         CallTracker.BeginModuleSession();
 
         Sms = new SmsService(engine);
@@ -263,7 +262,7 @@ public sealed class ModemManager : IAsyncDisposable
 
         // 4) 启动主动上报泵
         _pumpCts = new CancellationTokenSource();
-        _pumpTask = Task.Run(() => PumpAsync(_pumpCts.Token));
+        _pumpTask = Task.Run(() => PumpAsync(_pumpCts.Token), ct);
 
         ConnectionChanged?.Invoke(this, true);
 
@@ -295,10 +294,10 @@ public sealed class ModemManager : IAsyncDisposable
             _pumpCts = null;
         }
 
-        if (_engine is not null)
+        if (Engine is not null)
         {
-            await _engine.DisposeAsync().ConfigureAwait(false);
-            _engine = null;
+            await Engine.DisposeAsync().ConfigureAwait(false);
+            Engine = null;
         }
 
         Sms = null;
@@ -330,7 +329,7 @@ public sealed class ModemManager : IAsyncDisposable
     /// <summary>执行任意 AT 指令（供控制台使用）。</summary>
     public async Task<AtResult> ExecuteAtAsync(string command, CancellationToken ct = default)
     {
-        if (_engine is null)
+        if (Engine is null)
         {
             return new AtResult(command, false, [], "未连接模块。", TimeSpan.Zero,
                 AtCompletionStatus.TransportFailure);
@@ -342,7 +341,7 @@ public sealed class ModemManager : IAsyncDisposable
             return new AtResult(command, false, [], admission.ErrorCode ?? "OperationConflict", TimeSpan.Zero,
                 AtCompletionStatus.OperationRejected);
         await using var lease = admission.Lease;
-        return await _engine.ExecuteAsync(command, TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+        return await Engine.ExecuteAsync(command, TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
     }
 
     public async ValueTask<ModuleOperationAdmissionResult> TryAcquireOperationAsync(
@@ -413,7 +412,7 @@ public sealed class ModemManager : IAsyncDisposable
         if (es10.Channel <= 0)
         {
             var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
-            if (opened is null || opened <= 0)
+            if (opened is null or <= 0)
                 return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
         }
         try
@@ -475,7 +474,7 @@ public sealed class ModemManager : IAsyncDisposable
         if (es10.Channel <= 0)
         {
             var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
-            if (opened is null || opened <= 0)
+            if (opened is null or <= 0)
                 return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
         }
         try
@@ -536,7 +535,7 @@ public sealed class ModemManager : IAsyncDisposable
         if (es10.Channel <= 0)
         {
             var opened = await es10.OpenIsdrAsync(ct: ct).ConfigureAwait(false);
-            if (opened is null || opened <= 0)
+            if (opened is null or <= 0)
                 return new LogicalChannelEs10.ProfileStateResult(false, -1, "ISD-R 逻辑通道无法打开");
         }
         try
@@ -643,7 +642,7 @@ public sealed class ModemManager : IAsyncDisposable
 
     private async Task<string?> ReadCurrentIccidAsync(CancellationToken ct)
     {
-        var engine = _engine;
+        var engine = Engine;
         if (engine is null) return null;
         AtResult result;
         try
@@ -726,12 +725,12 @@ public sealed class ModemManager : IAsyncDisposable
             {
                 await Task.Delay(300, ct).ConfigureAwait(false);
 
-                if (_engine is null)
+                if (Engine is null)
                 {
                     continue;
                 }
 
-                var lines = _engine.DrainUnsolicited();
+                var lines = Engine.DrainUnsolicited();
                 foreach (var line in lines)
                 {
                     UnsolicitedLine?.Invoke(this, line);

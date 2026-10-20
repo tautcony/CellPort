@@ -1,5 +1,4 @@
 using CellPort.Core.Transport;
-using CellPort.Platform.MacOS;
 using Xunit;
 
 namespace CellPort.Platform.MacOS.Tests;
@@ -13,8 +12,8 @@ public class LibUsbAtChannelTests
     public void BulkPairIgnoresInterruptAndRequiresBothDirections()
     {
         Assert.Equal(((byte)0x84, (byte)0x03), LibUsbAtChannel.FindBulkPair([
-            new(0x85, 0x03), new(0x84, 0x02), new(0x03, 0x02)]));
-        Assert.Null(LibUsbAtChannel.FindBulkPair([new(0x84, 0x02)]));
+            new LibUsbEndpoint(0x85, 0x03), new LibUsbEndpoint(0x84, 0x02), new LibUsbEndpoint(0x03, 0x02)]));
+        Assert.Null(LibUsbAtChannel.FindBulkPair([new LibUsbEndpoint(0x84, 0x02)]));
     }
 
     [Fact]
@@ -24,8 +23,8 @@ public class LibUsbAtChannelTests
         try
         {
             var registry = MacUsbSerialIdentityReader.GetUsbDeviceIdentities();
-            if (!registry.Any(device => (device.VendorId, device.ProductId) == (ModuleIdentity.DjiVendorId, ModuleIdentity.DjiProductId))) return;
-            var channel = LibUsbAtChannel.TryOpen(new NativeLibUsbApi(), registry, default);
+            if (registry.All(device => (device.VendorId, device.ProductId) != (ModuleIdentity.DjiVendorId, ModuleIdentity.DjiProductId))) return;
+            var channel = LibUsbAtChannel.TryOpen(new NativeLibUsbApi(), registry, CancellationToken.None);
             Assert.NotNull(channel);
             await channel!.DisposeAsync();
         }
@@ -50,8 +49,11 @@ public class LibUsbAtChannelTests
     {
         var api = new FakeApi(
             [Dji],
-            [new(2, 0, [new(0x85, 3), new(0x84, 2), new(0x03, 2)]), new(3, 0, [new(0x86, 2), new(0x04, 2)])]);
-        var channel = LibUsbAtChannel.TryOpen(api, MatchingRegistry, default)!;
+            [
+                new LibUsbAltSetting(2, 0, [new LibUsbEndpoint(0x85, 3), new LibUsbEndpoint(0x84, 2), new(0x03, 2)]),
+                new LibUsbAltSetting(3, 0, [new LibUsbEndpoint(0x86, 2), new LibUsbEndpoint(0x04, 2)])
+            ]);
+        var channel = LibUsbAtChannel.TryOpen(api, MatchingRegistry, CancellationToken.None)!;
         Assert.NotNull(channel);
         await channel.OpenAsync();
         Assert.Equal([2], api.Claimed);
@@ -64,8 +66,12 @@ public class LibUsbAtChannelTests
     [Fact]
     public async Task UsesInterfaceThreeWhenInterfaceTwoHasNoBulkPair()
     {
-        var api = new FakeApi([Dji], [new(2, 0, [new(0x84, 2)]), new(3, 0, [new(0x86, 2), new(0x04, 2)])]);
-        var channel = LibUsbAtChannel.TryOpen(api, MatchingRegistry, default)!;
+        var api = new FakeApi([Dji],
+        [
+            new LibUsbAltSetting(2, 0, [new LibUsbEndpoint(0x84, 2)]),
+            new LibUsbAltSetting(3, 0, [new LibUsbEndpoint(0x86, 2), new LibUsbEndpoint(0x04, 2)])
+        ]);
+        var channel = LibUsbAtChannel.TryOpen(api, MatchingRegistry, CancellationToken.None)!;
         Assert.Equal([3], api.Claimed);
         await channel.DisposeAsync();
     }
@@ -73,15 +79,24 @@ public class LibUsbAtChannelTests
     [Fact]
     public async Task ReadWriteAndDisposeUseClaimedEndpoints()
     {
-        var api = new FakeApi([Dji], [new(2, 0, [new(0x84, 2), new(0x03, 2)])]) { ReadChunks = new(new byte[][] { [0x2B, 0x51, 0x49, 0x4E, 0x44], [0x4F, 0x4B, 0x0D, 0x0A] }) };
-        var channel = LibUsbAtChannel.TryOpen(api, MatchingRegistry, default)!;
+        var api = new FakeApi([Dji],
+            [
+                new LibUsbAltSetting(2, 0, [new LibUsbEndpoint(0x84, 2), new LibUsbEndpoint(0x03, 2)])
+            ])
+        {
+            ReadChunks = new Queue<byte[]>(new byte[][]
+            {
+                [.. "+QIND"u8], [.. "OK\r\n"u8]
+            })
+        };
+        var channel = LibUsbAtChannel.TryOpen(api, MatchingRegistry, CancellationToken.None)!;
         var output = new byte[8];
         Assert.Equal(5, await channel.ReadAsync(output, TimeSpan.FromMilliseconds(100)));
-        Assert.Equal(new byte[] { 0x2B, 0x51, 0x49, 0x4E, 0x44 }, output[..5]);
+        Assert.Equal("+QIND"u8.ToArray(), output[..5]);
         Assert.Equal(4, await channel.ReadAsync(output, TimeSpan.FromMilliseconds(100)));
-        Assert.Equal(new byte[] { 0x4F, 0x4B, 0x0D, 0x0A }, output[..4]);
-        await channel.WriteAsync(new byte[] { 0x41, 0x54, 0x0D });
-        Assert.Equal(new byte[] { 0x41, 0x54, 0x0D }, api.Written);
+        Assert.Equal("OK\r\n"u8.ToArray(), output[..4]);
+        await channel.WriteAsync("AT\r"u8.ToArray());
+        Assert.Equal("AT\r"u8.ToArray(), api.Written);
         await channel.DisposeAsync();
         Assert.Equal(0x84, api.LastReadEndpoint);
         Assert.Equal(0x03, api.LastWriteEndpoint);

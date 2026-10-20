@@ -1,7 +1,5 @@
 using Avalonia;
 using Avalonia.Headless;
-using Avalonia.Headless.XUnit;
-using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
 using CellPort.App.Services;
 
@@ -13,7 +11,7 @@ public static class TestAppBuilder
 {
     public static AppBuilder BuildAvaloniaApp()
     {
-        CellPort.App.Views.AppSettings.ConfigPathOverride = Path.Combine(Path.GetTempPath(), "CellPort.App.Tests", Guid.NewGuid().ToString("N"), "settings.json");
+        Views.AppSettings.ConfigPathOverride = Path.Combine(Path.GetTempPath(), "CellPort.App.Tests", Guid.NewGuid().ToString("N"), "settings.json");
         return AppBuilder.Configure<TestApplication>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
     }
 }

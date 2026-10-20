@@ -45,7 +45,6 @@ public static class RuntimeManifestValidator
         bool userSuppliedResources = false)
     {
         var errors = new List<string>();
-        string? profileId = null;
         if (string.IsNullOrWhiteSpace(manifestJson) || string.IsNullOrWhiteSpace(bundleDirectory))
         {
             return Invalid("MANIFEST_INPUT_INVALID");
@@ -77,7 +76,7 @@ public static class RuntimeManifestValidator
                 errors.Add("MANIFEST_STATUS_INVALID");
             }
 
-            profileId = GetId(root, "profileId", errors);
+            var profileId = GetId(root, "profileId", errors);
             var device = RequiredObject(root, "device", errors);
             CheckProperties(device, Set("vendorId", "productId", "model", "firmwareExact"), errors);
             CompareTarget(GetString(device, "vendorId", errors), target.VendorId,
@@ -326,7 +325,7 @@ public static class RuntimeManifestValidator
         var revision = GetString(source, "revision", errors);
         var sourcePath = GetString(source, "sourcePath", errors);
         if (!Uri.TryCreate(repository, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
-            revision is null || !(revision.Length is 40 or 64) || revision.Any(c => !Uri.IsHexDigit(c)) ||
+            revision?.Length is not (40 or 64) || revision.Any(c => !Uri.IsHexDigit(c)) ||
             sourcePath is null || !IsSafeRelativePath(sourcePath))
             errors.Add("RESOURCE_SOURCE_INVALID");
     }

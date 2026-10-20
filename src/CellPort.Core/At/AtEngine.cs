@@ -52,11 +52,10 @@ public sealed class AtEngine : IAsyncDisposable
     /// <summary>发送短信等长耗时操作的超时。</summary>
     public static readonly TimeSpan LongTimeout = TimeSpan.FromSeconds(60);
 
-    private readonly IAtChannel _channel;
     private readonly PrioritizedCommandLock _commandLock = new();
     private readonly StringBuilder _pending = new();
     private readonly List<string> _unsolicitedQueue = [];
-    private readonly object _unsolicitedLock = new();
+    private readonly Lock _unsolicitedLock = new();
 
     /// <summary>收到未经请求的主动上报（如 +CMTI）时触发。</summary>
     public event EventHandler<string>? UnsolicitedReport;
@@ -66,11 +65,11 @@ public sealed class AtEngine : IAsyncDisposable
 
     public AtEngine(IAtChannel channel)
     {
-        _channel = channel;
+        Channel = channel;
     }
 
     /// <summary>底层通道。</summary>
-    public IAtChannel Channel => _channel;
+    public IAtChannel Channel { get; }
 
     /// <summary>
     /// 执行一条 AT 指令。
@@ -103,27 +102,27 @@ public sealed class AtEngine : IAsyncDisposable
         }
 
         using var commandLease = lease;
+        
+        var remaining = effectiveTimeout - (DateTime.UtcNow - started);
+        if (remaining <= TimeSpan.Zero)
         {
-            var remaining = effectiveTimeout - (DateTime.UtcNow - started);
-            if (remaining <= TimeSpan.Zero)
-            {
-                return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
-                    AtCompletionStatus.Timeout);
-            }
-
-            try
-            {
-                await _channel.WriteAsync(Encoding.ASCII.GetBytes(full + "\r"), ct).ConfigureAwait(false);
-                IoTrace?.Invoke(this, $">>> {full}\\r");
-            }
-            catch (Exception ex)
-            {
-                IoTrace?.Invoke(this, $"!!! write failed: {ex.GetType().Name} {ex.Message}");
-                throw;
-            }
-
-            return await ReadUntilFinalAsync(full, effectiveTimeout, started, ct).ConfigureAwait(false);
+            return new AtResult(full, false, [], string.Empty, DateTime.UtcNow - started,
+                AtCompletionStatus.Timeout);
         }
+
+        try
+        {
+            await Channel.WriteAsync(Encoding.ASCII.GetBytes(full + "\r"), ct).ConfigureAwait(false);
+            IoTrace?.Invoke(this, $">>> {full}\\r");
+        }
+        catch (Exception ex)
+        {
+            IoTrace?.Invoke(this, $"!!! write failed: {ex.GetType().Name} {ex.Message}");
+            throw;
+        }
+
+        return await ReadUntilFinalAsync(full, effectiveTimeout, started, ct).ConfigureAwait(false);
+        
     }
 
     private async Task<AtResult> ReadUntilFinalAsync(
@@ -151,7 +150,7 @@ public sealed class AtEngine : IAsyncDisposable
             int read;
             try
             {
-                read = await _channel.ReadAsync(buffer, slice, ct).ConfigureAwait(false);
+                read = await Channel.ReadAsync(buffer, slice, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -343,7 +342,7 @@ public sealed class AtEngine : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _channel.DisposeAsync().ConfigureAwait(false);
+        await Channel.DisposeAsync().ConfigureAwait(false);
         _commandLock.Dispose();
     }
 }

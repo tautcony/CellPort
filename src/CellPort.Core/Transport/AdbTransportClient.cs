@@ -154,7 +154,7 @@ internal sealed class SystemAdbProcessRunner : IAdbProcessRunner
             TryKill(process);
             try
             {
-                await process.WaitForExitAsync().ConfigureAwait(false);
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
                 await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
             }
             catch

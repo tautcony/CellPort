@@ -20,8 +20,8 @@ public sealed class AudioDiagnosticExporterTests
             AdbToolVersion = "35.0.1-11580240",
             VendorLibrarySha256 = new Dictionary<string, string?>
             {
-                ["libql_lib_audio.so.1.0.0"] = new string('a', 64),
-                ["invalid/path"] = new string('b', 64),
+                ["libql_lib_audio.so.1.0.0"] = new('a', 64),
+                ["invalid/path"] = new('b', 64),
                 ["unknown.so"] = "not-a-hash",
             },
             GetPropStatus = DiagnosticMetadataStatus.Unavailable,

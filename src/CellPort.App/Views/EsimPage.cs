@@ -32,7 +32,7 @@ public sealed class EsimPage : UserControl, IModuleAware, IDisposable, IAsyncDis
     public EsimPage()
     {
         var readHeader = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Avalonia.Thickness(0, 0, 0, 10) };
-        readHeader.Children.Add(new TextBlock { Text = "eSIM 管理", FontSize = 15, FontWeight = Avalonia.Media.FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        readHeader.Children.Add(new TextBlock { Text = "eSIM 管理", FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         readHeader.Children.Add(RefreshButton);
         var info = new StackPanel { Spacing = 5, Margin = new Avalonia.Thickness(0, 0, 0, 10) };
         info.Children.Add(new TextBlock { Text = "EID" }); info.Children.Add(_eid);
@@ -40,7 +40,7 @@ public sealed class EsimPage : UserControl, IModuleAware, IDisposable, IAsyncDis
         var content = new StackPanel { Spacing = 9, Margin = new Avalonia.Thickness(16) };
         content.Children.Add(readHeader); content.Children.Add(info); content.Children.Add(_hint); content.Children.Add(_profiles);
         Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
-        RefreshButton.Click += async (_, _) => await TrackAsync(() => RefreshListAsync());
+        RefreshButton.Click += async (_, _) => await TrackAsync(RefreshListAsync);
     }
 
     public void OnActivated(ModemManager modem) => _modem = modem;
@@ -87,11 +87,7 @@ public sealed class EsimPage : UserControl, IModuleAware, IDisposable, IAsyncDis
 
     private void RenderReady(DeviceInfoService.EuiccProbeResult result)
     {
-        if (string.IsNullOrEmpty(result.Eid))
-        {
-            _eid.Text = "不可读取";
-        }
-        else _eid.Text = result.Eid;
+        _eid.Text = string.IsNullOrEmpty(result.Eid) ? "不可读取" : result.Eid;
         _hint.Text = result.Profiles.Count == 0
             ? "暂无 Profile"
             : $"{result.Profiles.Count} 个 Profile";
@@ -108,7 +104,7 @@ public sealed class EsimPage : UserControl, IModuleAware, IDisposable, IAsyncDis
         if (!string.IsNullOrWhiteSpace(profile.Iccid) && profile.State is 0 or 1)
         {
             AddAction(actions, profile.Enabled ? "停用" : "启用", () => TrackAsync(() => ToggleAsync(profile)));
-            if (profile.State == 0 && !profile.IsBootstrap)
+            if (profile is { State: 0, IsBootstrap: false })
                 AddAction(actions, "删除", () => TrackAsync(() => DeleteAsync(profile)));
         }
         if (!string.IsNullOrWhiteSpace(profile.Iccid)) AddAction(actions, "改名", () => TrackAsync(() => RenameAsync(profile)));
@@ -221,8 +217,8 @@ public sealed class EsimPage : UserControl, IModuleAware, IDisposable, IAsyncDis
     {
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), Margin = new Avalonia.Thickness(10) };
         var text = new StackPanel { Spacing = 4 };
-        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = Avalonia.Media.FontWeight.SemiBold, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-        text.Children.Add(new TextBlock { Text = detail, FontSize = 12, Opacity = .8, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = detail, FontSize = 12, Opacity = .8, TextWrapping = TextWrapping.Wrap });
         grid.Children.Add(text);
         if (!string.IsNullOrEmpty(badge)) { var b = new TextBlock { Text = badge, Margin = new Avalonia.Thickness(10), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(b, 1); grid.Children.Add(b); }
         if (actions is not null) { Grid.SetColumn(actions, 2); grid.Children.Add(actions); }

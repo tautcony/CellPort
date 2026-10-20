@@ -158,8 +158,8 @@ public sealed class RuntimeManifestValidatorTests
     private sealed class SyntheticBundle : IDisposable
     {
         private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-        private readonly byte[] _helperBytes = "synthetic route helper"u8.ToArray();
-        private readonly byte[] _driverBytes = "synthetic module bytes"u8.ToArray();
+        private readonly byte[] _helperBytes = [.. "synthetic route helper"u8];
+        private readonly byte[] _driverBytes = [.. "synthetic module bytes"u8];
 
         public SyntheticBundle(string distribution = "redistributable")
         {

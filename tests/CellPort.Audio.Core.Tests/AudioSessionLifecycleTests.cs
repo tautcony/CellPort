@@ -1,6 +1,5 @@
 using CellPort.Audio.Core.Models;
 using CellPort.Audio.Core.Services;
-using System.Collections.Generic;
 using Xunit;
 
 namespace CellPort.Audio.Core.Tests;

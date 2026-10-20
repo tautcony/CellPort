@@ -8,31 +8,24 @@ namespace CellPort.Audio.Core.Services;
 /// host boundary muted through permission, endpoint, call-generation and first-frame
 /// checks; the native backend remains responsible for applying HostMuted.
 /// </summary>
-public sealed class AudioMediaActivationGate
+public sealed class AudioMediaActivationGate(AudioSessionLifecycle lifecycle, TimeProvider? timeProvider = null)
 {
     public static readonly TimeSpan MaximumCallSnapshotAge = TimeSpan.FromSeconds(3);
     public const int MaximumRebuildsPerCall = 2;
 
-    private readonly AudioSessionLifecycle _lifecycle;
-    private readonly TimeProvider _timeProvider;
+    private readonly AudioSessionLifecycle _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private AudioSessionLease? _lease;
-    private AudioMediaGeneration? _generation;
     private long _callGeneration;
-    private int _rebuilds;
     private bool _permissionGranted;
     private bool _mediaRunning;
     private bool _userMuted;
 
-    public AudioMediaActivationGate(AudioSessionLifecycle lifecycle, TimeProvider? timeProvider = null)
-    {
-        _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
-        _timeProvider = timeProvider ?? TimeProvider.System;
-    }
-
     public bool HostMuted { get; private set; } = true;
     public bool AtMuteFallbackActive { get; private set; }
-    public int RebuildAttempts => _rebuilds;
-    public AudioMediaGeneration? CurrentGeneration => _generation;
+    public int RebuildAttempts { get; private set; }
+
+    public AudioMediaGeneration? CurrentGeneration { get; private set; }
 
     public bool TryBegin(
         AudioSessionLease lease,
@@ -58,12 +51,12 @@ public sealed class AudioMediaActivationGate
         }
 
         _lease = lease;
-        _generation = generation;
+        CurrentGeneration = generation;
         _callGeneration = call.Key.CallGeneration;
         _permissionGranted = true;
         _mediaRunning = false;
         _userMuted = false;
-        _rebuilds = 0;
+        RebuildAttempts = 0;
         return true;
     }
 
@@ -141,12 +134,12 @@ public sealed class AudioMediaActivationGate
         ArgumentNullException.ThrowIfNull(freshCallSnapshot);
         generation = null;
         HostMuted = true;
-        if (_lease is null || _generation is null)
+        if (_lease is null || CurrentGeneration is null)
         {
             errorCode = AudioErrorCode.RouteNotReady;
             return false;
         }
-        if (_rebuilds >= MaximumRebuildsPerCall)
+        if (RebuildAttempts >= MaximumRebuildsPerCall)
         {
             errorCode = AudioErrorCode.RouteNotReady;
             StopCurrentRoute();
@@ -165,12 +158,12 @@ public sealed class AudioMediaActivationGate
         if (!_lifecycle.TryStartMedia(lease, _callGeneration, out generation))
         {
             errorCode = AudioErrorCode.RouteNotReady;
-            _generation = null;
+            CurrentGeneration = null;
             _mediaRunning = false;
             return false;
         }
-        ++_rebuilds;
-        _generation = generation;
+        ++RebuildAttempts;
+        CurrentGeneration = generation;
         _permissionGranted = true;
         _mediaRunning = false;
         _userMuted = false;
@@ -205,12 +198,12 @@ public sealed class AudioMediaActivationGate
     }
 
     private bool OwnsGeneration(AudioMediaGeneration generation) =>
-        _generation is not null && _generation == generation;
+        CurrentGeneration is not null && CurrentGeneration == generation;
 
     private void StopCurrentRoute()
     {
         if (_lease is not null) _lifecycle.StopMedia(_lease);
-        _generation = null;
+        CurrentGeneration = null;
         _mediaRunning = false;
     }
 }

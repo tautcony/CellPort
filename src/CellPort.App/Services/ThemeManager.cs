@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Markup.Xaml.MarkupExtensions;
@@ -17,7 +19,7 @@ public static class ThemeManager
     {
         if (_stylesInstalled) return;
         _stylesInstalled = true;
-        app.Styles.Add(StyleFor<Window>(Window.BackgroundProperty, "AppBackground"));
+        app.Styles.Add(StyleFor<Window>(TemplatedControl.BackgroundProperty, "AppBackground"));
         app.Styles.Add(new Style(x => x.OfType<TextBlock>())
         {
             Setters = { new Setter(TextBlock.FontSizeProperty, 13d), new Setter(TextBlock.ForegroundProperty, Resource("TextPrimary")) }
@@ -26,37 +28,37 @@ public static class ThemeManager
         {
             Setters =
             {
-                new Setter(Control.MinHeightProperty, 32d),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(10, 5)),
+                new Setter(Layoutable.MinHeightProperty, 32d),
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 5)),
             }
         });
         app.Styles.Add(new Style(x => x.OfType<Button>().Class("nav-item"))
         {
             Setters =
             {
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, Resource("SidebarSurface")),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty, Resource("TextSecondary")),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BorderBrushProperty, Brushes.Transparent),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BorderThicknessProperty, new Thickness(1)),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.CornerRadiusProperty, new CornerRadius(8)),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(10, 5)),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.FontSizeProperty, 13d),
-                new Setter(Control.MinHeightProperty, 34d),
-                new Setter(Control.HeightProperty, 34d),
+                new Setter(TemplatedControl.BackgroundProperty, Resource("SidebarSurface")),
+                new Setter(TemplatedControl.ForegroundProperty, Resource("TextSecondary")),
+                new Setter(TemplatedControl.BorderBrushProperty, Brushes.Transparent),
+                new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(1)),
+                new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(8)),
+                new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 5)),
+                new Setter(TemplatedControl.FontSizeProperty, 13d),
+                new Setter(Layoutable.MinHeightProperty, 34d),
+                new Setter(Layoutable.HeightProperty, 34d),
             }
         });
         app.Styles.Add(new Style(x => x.OfType<Button>().Class("nav-item").Class("selected"))
         {
             Setters =
             {
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, Resource("NavSelected")),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty, Resource("Accent")),
-                new Setter(Avalonia.Controls.Primitives.TemplatedControl.FontWeightProperty, FontWeight.SemiBold),
+                new Setter(TemplatedControl.BackgroundProperty, Resource("NavSelected")),
+                new Setter(TemplatedControl.ForegroundProperty, Resource("Accent")),
+                new Setter(TemplatedControl.FontWeightProperty, FontWeight.SemiBold),
             }
         });
         app.Styles.Add(new Style(x => x.OfType<TextBox>())
         {
-            Setters = { new Setter(Control.MinHeightProperty, 34d), new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(8, 5)) }
+            Setters = { new Setter(Layoutable.MinHeightProperty, 34d), new Setter(TemplatedControl.PaddingProperty, new Thickness(8, 5)) }
         });
         app.Styles.Add(new Style(x => x.OfType<Border>())
         {

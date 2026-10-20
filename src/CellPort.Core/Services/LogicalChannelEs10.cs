@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Net.Http;
 using System.Text.RegularExpressions;
 using CellPort.Core.At;
 using CellPort.Core.Models;
@@ -27,13 +26,11 @@ namespace CellPort.Core.Services;
 ///   · 响应 sw1=0x61 时用 GET RESPONSE（80 C0 00 00 &lt;sw2&gt;）循环取数，
 ///     直到 (sw1 &amp; 0xF0) == 0x90。
 /// </summary>
-public sealed class LogicalChannelEs10
+public sealed class LogicalChannelEs10(AtEngine engine, HttpClient? notificationHttpClient = null)
 {
     private static readonly HttpClient NotificationHttpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-    private readonly AtEngine _engine;
-    private readonly HttpClient _notificationHttpClient;
-    private int _channel;
+    private readonly HttpClient _notificationHttpClient = notificationHttpClient ?? NotificationHttpClient;
 
     /// <summary>最近成功打开的 ISD-R AID。</summary>
     public string? IsdrAidHex { get; private set; }
@@ -59,14 +56,8 @@ public sealed class LogicalChannelEs10
     /// <summary>ES10 STORE DATA 单块上限，取 lpac 默认值。</summary>
     private const int Es10xMss = 120;
 
-    public LogicalChannelEs10(AtEngine engine, HttpClient? notificationHttpClient = null)
-    {
-        _engine = engine;
-        _notificationHttpClient = notificationHttpClient ?? NotificationHttpClient;
-    }
-
     /// <summary>当前逻辑通道号（0 = 未打开）。</summary>
-    public int Channel => _channel;
+    public int Channel { get; private set; }
 
     /// <summary>
     /// 探测固件是否支持逻辑通道指令组。CellDock 的做法完全一致：
@@ -93,9 +84,9 @@ public sealed class LogicalChannelEs10
     {
         aidHex ??= IsdrAidHex ?? StandardIsdrAidHex;
 
-        if (_channel > 0)
+        if (Channel > 0)
             await CloseAsync().ConfigureAwait(false);
-        _channel = 0;
+        Channel = 0;
 
         for (var i = 1; i <= 3; i++)
         {
@@ -122,7 +113,7 @@ public sealed class LogicalChannelEs10
             return null; // CellDock 同样拒绝非法通道号
         }
 
-        _channel = ch;
+        Channel = ch;
         IsdrAidHex = aidHex;
         return ch;
     }
@@ -130,10 +121,10 @@ public sealed class LogicalChannelEs10
     /// <summary>关闭当前逻辑通道。</summary>
     public async Task CloseAsync()
     {
-        if (_channel > 0)
+        if (Channel > 0)
         {
-            await ExecAsync($"AT+CCHC={_channel}", ct: default).ConfigureAwait(false);
-            _channel = 0;
+            await ExecAsync($"AT+CCHC={Channel}", ct: CancellationToken.None).ConfigureAwait(false);
+            Channel = 0;
         }
     }
 
@@ -148,21 +139,17 @@ public sealed class LogicalChannelEs10
     /// </summary>
     public async Task<ApduExchange?> TransmitAsync(byte[] apdu, CancellationToken ct = default)
     {
-        if (_channel <= 0 || apdu.Length == 0)
+        if (Channel <= 0 || apdu.Length == 0)
         {
             return null;
         }
 
         var hex = Hex(apdu);
-        var cmd = $@"AT+CGLA={_channel},{hex.Length},""{hex}""";
+        var cmd = $@"AT+CGLA={Channel},{hex.Length},""{hex}""";
 
         var r = await ExecAsync(cmd, ct, AtEngine.LongTimeout).ConfigureAwait(false);
-        if (r is null)
-        {
-            return null;
-        }
 
-        var line = r.LinesWithPrefix("+CGLA").FirstOrDefault();
+        var line = r?.LinesWithPrefix("+CGLA").FirstOrDefault();
         if (line is null)
         {
             return null;
@@ -212,7 +199,7 @@ public sealed class LogicalChannelEs10
     /// </summary>
     public async Task<byte[]?> Es10CommandAsync(byte[] berRequest, CancellationToken ct = default)
     {
-        if (_channel <= 0)
+        if (Channel <= 0)
         {
             return null;
         }
@@ -228,7 +215,7 @@ public sealed class LogicalChannelEs10
             var p1 = isLast ? (byte)0x91 : (byte)0x11;
 
             var apdu = new byte[5 + take];
-            apdu[0] = (byte)(0x80 | (_channel & 0x0F));
+            apdu[0] = (byte)(0x80 | (Channel & 0x0F));
             apdu[1] = 0xE2;
             apdu[2] = p1;
             apdu[3] = (byte)seq;
@@ -247,16 +234,13 @@ public sealed class LogicalChannelEs10
             // 本块的数据收集 + 61xx 续读循环
             while (true)
             {
-                for (var i = 0; i < resp.Data.Count; i++)
-                {
-                    collected.Add(resp.Data[i]);
-                }
+                collected.AddRange(resp.Data);
 
                 if (resp.Sw1 == 0x61)
                 {
                     var gr = new byte[]
                     {
-                        (byte)(0x80 | (_channel & 0x0F)),
+                        (byte)(0x80 | (Channel & 0x0F)),
                         0xC0, 0x00, 0x00, (byte)resp.Sw2,
                     };
                     resp = await TransmitAsync(gr, ct).ConfigureAwait(false);
@@ -314,7 +298,7 @@ public sealed class LogicalChannelEs10
         // ---- 路径 2：GET DATA (EID) ----
         var gd = new byte[]
         {
-            (byte)(0x80 | (_channel & 0x0F)),
+            (byte)(0x80 | (Channel & 0x0F)),
             0xCA, 0x9F, 0x7F, 0x00,
         };
 
@@ -521,7 +505,7 @@ public sealed class LogicalChannelEs10
         if (sequence is null || eventValue is null || address is null)
             return null;
         var eventIndex = ParseBitStringIndex(eventValue.Value);
-        if (eventIndex is null || eventIndex.Value > 3)
+        if (eventIndex is null or > 3)
             return null;
         var iccid = BerTlv.Find(children, 0x5A);
         return new NotificationMetadata(
@@ -579,7 +563,7 @@ public sealed class LogicalChannelEs10
             bytes.Insert(0, (byte)(tag & 0xFF));
             tag >>= 8;
         } while (tag > 0);
-        return bytes.ToArray();
+        return [.. bytes];
     }
 
     private static byte[] EncodeTlv(byte[] tag, byte[] value)
@@ -587,7 +571,7 @@ public sealed class LogicalChannelEs10
         var length = value.Length < 0x80
             ? new[] { (byte)value.Length }
             : value.Length <= 0xFF
-                ? new[] { (byte)0x81, (byte)value.Length }
+                ? [(byte)0x81, (byte)value.Length]
                 : [(byte)0x82, (byte)(value.Length >> 8), (byte)value.Length];
         return [.. tag, .. length, .. value];
     }
@@ -611,7 +595,7 @@ public sealed class LogicalChannelEs10
     internal async Task<ProfileStateResult> SetProfileStateAsync(
         string profileIdentifier, bool enable, CancellationToken ct = default)
     {
-        if (_channel <= 0)
+        if (Channel <= 0)
         {
             return new ProfileStateResult(false, -1, "ISD-R 逻辑通道未打开");
         }
@@ -665,7 +649,7 @@ public sealed class LogicalChannelEs10
     public async Task<ProfileStateResult> DeleteProfileAsync(
         string isdpAidHexOrIccid, CancellationToken ct = default)
     {
-        if (_channel <= 0)
+        if (Channel <= 0)
         {
             return new ProfileStateResult(false, -1, "ISD-R 逻辑通道未打开");
         }
@@ -693,7 +677,7 @@ public sealed class LogicalChannelEs10
     public async Task<ProfileStateResult> SetNicknameAsync(
         string iccid, string nickname, CancellationToken ct = default)
     {
-        if (_channel <= 0)
+        if (Channel <= 0)
         {
             return new ProfileStateResult(false, -1, "ISD-R 逻辑通道未打开");
         }
@@ -804,7 +788,7 @@ public sealed class LogicalChannelEs10
             {
                 throw new ArgumentException("ISD-P AID 格式错误");
             }
-            if (aid.Length == 0 || aid.Length > 16)
+            if (aid.Length is 0 or > 16)
             {
                 throw new ArgumentException("ISD-P AID 长度异常");
             }
@@ -870,7 +854,7 @@ public sealed class LogicalChannelEs10
     {
         try
         {
-            var r = await _engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
+            var r = await engine.ExecuteAsync(cmd, timeout, ct).ConfigureAwait(false);
             return r.Succeeded ? r : null;
         }
         catch

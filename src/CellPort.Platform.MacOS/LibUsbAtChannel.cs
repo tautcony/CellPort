@@ -115,12 +115,12 @@ internal sealed class LibUsbAtChannel : IAtChannel
             {
                 ct.ThrowIfCancellationRequested();
                 if (DateTime.UtcNow >= deadline) throw new TimeoutException("Timed out writing to the USB AT interface.");
-                var bytes = data.Slice(offset).ToArray();
+                var bytes = data[offset..].ToArray();
                 var transfer = await Task.Run(() =>
                 {
                     var result = _api.BulkTransfer(_handle, _outputEndpoint, bytes, bytes.Length, out var count, TransferSliceMs);
                     return (result, count);
-                }).ConfigureAwait(false);
+                }, ct).ConfigureAwait(false);
                 var result = transfer.result;
                 var transferred = transfer.count;
                 if (result == _api.TimeoutErrorCode) continue;
@@ -150,7 +150,7 @@ internal sealed class LibUsbAtChannel : IAtChannel
                 {
                     var result = _api.BulkTransfer(_handle, _inputEndpoint, bytes, bytes.Length, out var count, waitMs);
                     return (result, count);
-                }).ConfigureAwait(false);
+                }, ct).ConfigureAwait(false);
                 var result = transfer.result;
                 var transferred = transfer.count;
                 if (result == _api.TimeoutErrorCode) continue;

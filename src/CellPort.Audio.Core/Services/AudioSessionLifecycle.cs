@@ -34,7 +34,7 @@ public sealed class AudioSessionLifecycleDiagnostic : EventArgs
 /// </summary>
 public sealed class AudioSessionLifecycle
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private AudioSessionLease? _lease;
     private ModuleAudioPhase _modulePhase = ModuleAudioPhase.Disconnected;
     private AudioMediaState _mediaState = AudioMediaState.Stopped;
@@ -164,7 +164,7 @@ public sealed class AudioSessionLifecycle
         {
             if (!OwnsCurrentLease(lease) || _modulePhase != ModuleAudioPhase.Restoring)
                 return false;
-            if (receipt.ValuesVerified && receipt.Status == AudioRecoveryStatus.Restored)
+            if (receipt is { ValuesVerified: true, Status: AudioRecoveryStatus.Restored })
             {
                 _lease = null;
                 _modulePhase = ModuleAudioPhase.Released;
@@ -182,7 +182,7 @@ public sealed class AudioSessionLifecycle
             }
         }
         PublishDiagnostic();
-        return receipt.ValuesVerified && receipt.Status == AudioRecoveryStatus.Restored;
+        return receipt is { ValuesVerified: true, Status: AudioRecoveryStatus.Restored };
     }
 
     private bool OwnsCurrentLease(AudioSessionLease lease) =>

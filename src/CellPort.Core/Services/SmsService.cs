@@ -8,11 +8,10 @@ namespace CellPort.Core.Services;
 /// </summary>
 public sealed class SmsService(AtEngine engine)
 {
-    private readonly AtEngine _engine = engine;
     private readonly List<SmsMessage> _inbox = [];
     private readonly Dictionary<int, SmsMessage> _storedMessagesByIndex = [];
     private readonly Dictionary<(string Number, int Ref), List<SmsMessage>> _pendingConcat = [];
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     /// <summary>收到一条新短信（含拼接完成的长短信）时触发。</summary>
     public event EventHandler<SmsMessage>? MessageReceived;
@@ -381,7 +380,7 @@ public sealed class SmsService(AtEngine engine)
     {
         try
         {
-            var r = await _engine.ExecuteAsync(cmd, timeout, ct ?? CancellationToken.None)
+            var r = await engine.ExecuteAsync(cmd, timeout, ct ?? CancellationToken.None)
                 .ConfigureAwait(false);
             return r.Succeeded ? r : null;
         }

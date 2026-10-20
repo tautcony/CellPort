@@ -180,7 +180,7 @@ public sealed class LinuxUsbDeviceCatalog
                     nodes.Add(Path.Combine(_deviceRoot, nodeName));
             }
         }
-        return nodes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToImmutableArray();
+        return [.. nodes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
     }
 
     private static string? ReadDriver(string interfacePath)

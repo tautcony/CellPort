@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Text;
-using CellPort.Audio.Core.Models;
 using CellPort.Audio.Core.Services;
 using CellPort.Core.At;
 using CellPort.Core.Services;
@@ -32,8 +31,10 @@ public class ModemManagerTests
         Assert.NotNull(modem.Info);
         Assert.NotNull(modem.Cusd);
         Assert.NotNull(modem.Phonebook);
-        Assert.Equal(new[] { "AT", "AT+CMGF=0", "AT+CNMI=2,1,0,0,0",
-            "AT+CPMS=\"SM\",\"SM\",\"SM\"", "AT+CLIP=1", "AT+CRC=1", "AT+CMOD=0" },
+        Assert.Equal([
+                "AT", "AT+CMGF=0", "AT+CNMI=2,1,0,0,0",
+                "AT+CPMS=\"SM\",\"SM\",\"SM\"", "AT+CLIP=1", "AT+CRC=1", "AT+CMOD=0"
+            ],
             channel.Commands.Take(7));
         Assert.Equal("AT+CMGL=4", channel.Commands.Last());
         Assert.Equal(1, statusUpdates);
@@ -68,11 +69,11 @@ public class ModemManagerTests
         modem.PrimePortHints(["COM1", "COM2", "COM3", "COM4", "COM5"]);
         modem.RememberPort = _ => throw new IOException("settings unavailable");
         Assert.True(await modem.ConnectAsync());
-        Assert.Equal(new[] { "usb", "detect", "serial:COM8" }, provider.Operations);
-        Assert.Equal(new[] { "COM1", "COM2", "COM3", "COM4", "COM5" }, provider.LastHints);
+        Assert.Equal(["usb", "detect", "serial:COM8"], provider.Operations);
+        Assert.Equal(["COM1", "COM2", "COM3", "COM4", "COM5"], provider.LastHints);
         provider.Detected = null;
         Assert.False(await modem.ConnectAsync());
-        Assert.Equal(new[] { "COM8", "COM1", "COM2", "COM3" }, provider.LastHints);
+        Assert.Equal(["COM8", "COM1", "COM2", "COM3"], provider.LastHints);
     }
 
     [Theory]
@@ -114,7 +115,7 @@ public class ModemManagerTests
         var provider = new FakeProvider();
         await using var modem = new ModemManager(provider);
         using var cts = new CancellationTokenSource();
-        cts.Cancel();
+        await cts.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => modem.ConnectAsync(ct: cts.Token));
         Assert.Empty(provider.Operations);
     }
@@ -218,7 +219,7 @@ public class ModemManagerTests
         public Task<string?> DetectSerialAsync(IReadOnlyList<string> knownPorts, CancellationToken ct = default)
         {
             Operations.Add("detect");
-            LastHints = knownPorts.ToArray();
+            LastHints = [.. knownPorts];
             return Task.FromResult(Detected);
         }
 

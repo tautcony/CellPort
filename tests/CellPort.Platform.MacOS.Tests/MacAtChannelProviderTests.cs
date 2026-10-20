@@ -1,6 +1,5 @@
 using System.Text;
 using CellPort.Core.Transport;
-using CellPort.Platform.MacOS;
 using Xunit;
 
 namespace CellPort.Platform.MacOS.Tests;

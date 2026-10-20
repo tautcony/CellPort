@@ -1,7 +1,5 @@
-using System.Collections.Immutable;
 using CellPort.Audio.Core.Models;
 using CellPort.Core.Transport;
-using CellPort.Platform.Linux;
 using Xunit;
 
 namespace CellPort.Platform.Linux.Tests;
@@ -30,7 +28,7 @@ public sealed class LinuxUsbDeviceCatalogTests
         Assert.Null(selected.Selection.Serial);
         Assert.False(selected.Selection.SerialReliable);
         Assert.True(adb.IsCurrent(selected.Selection));
-        Assert.Equal(new[] { "-t", "42", "shell", "id" },
+        Assert.Equal(["-t", "42", "shell", "id"],
             AdbTransportClient.BuildArguments(selected.Selection, ["shell", "id"]));
     }
 

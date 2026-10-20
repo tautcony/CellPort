@@ -1,4 +1,3 @@
-using System.Text;
 using CellPort.Audio.Core.Services;
 using CellPort.Core.At;
 using CellPort.Core.Services;
@@ -57,7 +56,7 @@ public sealed class CallFreshnessQueueIntegrationTests
 
         public Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
         {
-            _pending = Encoding.ASCII.GetBytes("\r\nOK\r\n");
+            _pending = [.. "\r\nOK\r\n"u8];
             _written.TrySetResult();
             return Task.CompletedTask;
         }

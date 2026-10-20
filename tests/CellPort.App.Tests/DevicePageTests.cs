@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using CellPort.App.Services;
 using CellPort.App.Views;
-using CellPort.Core.Models;
 using CellPort.Core.Services;
 using CellPort.Core.Transport;
 
@@ -46,8 +45,8 @@ public sealed class DevicePageTests
             Assert.Equal("PhonebookButton", page.PhonebookButton.Name);
             Assert.Equal("ReconnectButton", page.ReconnectButton.Name);
 
-            var labels = page.InfoGrid.Children.OfType<Avalonia.Controls.StackPanel>()
-                .Select(x => (x.Children[0] as Avalonia.Controls.TextBlock)?.Text)
+            var labels = page.InfoGrid.Children.OfType<StackPanel>()
+                .Select(x => (x.Children[0] as TextBlock)?.Text)
                 .ToArray();
             Assert.Contains("连接状态", labels);
             Assert.Contains("IMEI", labels);
@@ -59,7 +58,7 @@ public sealed class DevicePageTests
             Assert.Contains("USB 模式", labels);
             Assert.Contains("更新时间", labels);
 
-            page.UssdSendButton.RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+            page.UssdSendButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Assert.Equal("模块未连接。", page.UssdResult.Text);
         }
         finally
@@ -75,7 +74,7 @@ public sealed class DevicePageTests
         PlatformServices.DiagnosticsOverride = () => "fake diagnostic";
         try
         {
-            Assert.Equal(new[] { "/dev/cu.fake-at" }, PlatformServices.EnumerateSerialPorts());
+            Assert.Equal(["/dev/cu.fake-at"], PlatformServices.EnumerateSerialPorts());
             Assert.Equal("fake diagnostic", PlatformServices.GetDiagnostics());
 
             var page = new DevicePage();
@@ -184,11 +183,11 @@ public sealed class DevicePageTests
             Assert.True(await modem.ConnectAsync("fake-device-port"));
             page.OnActivated(modem);
             await WaitForInitializationAsync(page);
-            page.PhonebookButton.RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+            page.PhonebookButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitForPhonebookAsync(page);
             Assert.Single(page.PhonebookPanel.Children);
-            Assert.Contains("John", (page.PhonebookPanel.Children[0] as Avalonia.Controls.Button)?.Content?.ToString());
-            Assert.Contains("5551234", (page.PhonebookPanel.Children[0] as Avalonia.Controls.Button)?.Content?.ToString());
+            Assert.Contains("John", (page.PhonebookPanel.Children[0] as Button)?.Content?.ToString());
+            Assert.Contains("5551234", (page.PhonebookPanel.Children[0] as Button)?.Content?.ToString());
             Assert.Contains("AT+CPBR=1,50", channel.Commands);
         }
         finally

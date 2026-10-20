@@ -60,7 +60,7 @@ public sealed class LinuxAdbTransportSelector
         var device = matches[0];
         if (!device.State.Equals("device", StringComparison.OrdinalIgnoreCase))
             return new(AdbSelectionStatus.TransportUnavailable, null);
-        if (device.TransportId is not long transportId || transportId <= 0)
+        if (device.TransportId is not ({ } transportId and > 0))
             return new(AdbSelectionStatus.TransportUnavailable, null);
         return new(AdbSelectionStatus.Selected,
             new AdbTransportSelection(transportId,

@@ -47,7 +47,7 @@ public sealed record CallSnapshot(
 /// </summary>
 public sealed class CallTracker(TimeProvider? timeProvider = null)
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly Dictionary<int, TrackedCall> _knownCalls = [];
     private long _moduleGeneration;
@@ -191,7 +191,7 @@ public sealed class CallTracker(TimeProvider? timeProvider = null)
 
             var completedCalls = calls.ToImmutable();
             var voiceCalls = completedCalls.Where(call => call.Entry.Mode == 0).ToArray();
-            var selected = voiceCalls.Length == 1 && voiceCalls[0].State == TrackedCallState.Active
+            var selected = voiceCalls is [{ State: TrackedCallState.Active }]
                 ? voiceCalls[0]
                 : null;
 

@@ -63,7 +63,7 @@ public sealed class MacAtChannelProvider : IAtChannelProvider
     public static IReadOnlyList<string> EnumeratePorts()
     {
         IEnumerable<string> directoryPorts;
-        try { directoryPorts = Directory.EnumerateFiles("/dev", "cu.*").ToArray(); }
+        try { directoryPorts = [.. Directory.EnumerateFiles("/dev", "cu.*")]; }
         catch (IOException) { directoryPorts = []; }
         catch (UnauthorizedAccessException) { directoryPorts = []; }
 

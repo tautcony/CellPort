@@ -113,7 +113,7 @@ public sealed class SerialAtChannel : IAtChannel
             {
                 try
                 {
-                    port.Write(data.Span.ToArray(), 0, data.Length);
+                    port.Write([.. data.Span], 0, data.Length);
                 }
                 catch (TimeoutException)
                 {
@@ -123,7 +123,7 @@ public sealed class SerialAtChannel : IAtChannel
                 {
                     throw new IOException($"串口 {_portName} 已关闭。");
                 }
-            }).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -195,7 +195,7 @@ public sealed class SerialAtChannel : IAtChannel
                 }
 
                 return 0; // 超时无数据
-            }).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -224,7 +224,7 @@ public sealed class SerialAtChannel : IAtChannel
         string[] names;
         try
         {
-            var task = Task.Run(() => SerialPort.GetPortNames());
+            var task = Task.Run(SerialPort.GetPortNames);
             if (!task.Wait(effectiveTimeout))
             {
                 // 超时：认为本次枚举不可用，返回空集合而不是卡住。

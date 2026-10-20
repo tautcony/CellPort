@@ -37,13 +37,13 @@ public static class SmsCodec
         var septets = new List<byte>(text.Length);
         foreach (var c in text)
         {
-            septets.Add(Gsm7Lookup.TryGetValue(c, out var v) ? v : (byte)'?');
+            septets.Add(Gsm7Lookup.GetValueOrDefault(c, (byte)'?'));
         }
 
         // 7-bit 打包：每 8 个 septet 压成 7 字节，最后不足时补位。
         var output = new List<byte>((septets.Count * 7 + 7) / 8);
         byte accumulator = 0;
-        int bits = 0;
+        var bits = 0;
 
         foreach (var s in septets)
         {
@@ -72,11 +72,11 @@ public static class SmsCodec
     {
         var count = septetCount > 0 ? septetCount : data.Length * 8 / 7;
         var sb = new StringBuilder(count);
-        int accumulator = 0;
-        int bits = 0;
-        int index = 0;
+        var accumulator = 0;
+        var bits = 0;
+        var index = 0;
 
-        for (int i = 0; i < count; i++)
+        for (var i = 0; i < count; i++)
         {
             while (bits < 7)
             {
@@ -97,7 +97,7 @@ public static class SmsCodec
             accumulator >>= 7;
             bits -= 7;
 
-            sb.Append(ReverseGsm7Lookup.TryGetValue(septet, out var ch) ? ch : '?');
+            sb.Append(ReverseGsm7Lookup.GetValueOrDefault(septet, '?'));
         }
 
         return sb.ToString();
@@ -131,7 +131,7 @@ public static class SmsCodec
         }
 
         var swapped = new StringBuilder(s.Length);
-        for (int i = 0; i < s.Length; i += 2)
+        for (var i = 0; i < s.Length; i += 2)
         {
             swapped.Append(s[i + 1]).Append(s[i]);
         }
@@ -148,7 +148,7 @@ public static class SmsCodec
             "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ ÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
             "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
         var table = new Dictionary<char, byte>();
-        for (int i = 0; i < basic.Length; i++)
+        for (var i = 0; i < basic.Length; i++)
         {
             table[basic[i]] = (byte)i;
         }

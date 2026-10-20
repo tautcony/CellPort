@@ -1,8 +1,5 @@
 using Avalonia;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Fonts.Inter;
 using Avalonia.Logging;
-using Avalonia.Platform;
 
 namespace CellPort.App;
 
