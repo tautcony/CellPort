@@ -1,31 +1,34 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework Condition="'$(OS)' == 'Windows_NT' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-'))">net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <UseWPF>true</UseWPF>
     <AssemblyName>CellPort</AssemblyName>
     <RootNamespace>CellPort.App</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>..\..\docs\cellport.ico</ApplicationIcon>
     <Version>1.0.1</Version>
     <AssemblyTitle>DJI 4G 模块管理器</AssemblyTitle>
     <Product>CellPort Module Manager</Product>
-    <Platforms>x64</Platforms>
+    <ApplicationIcon Condition="'$(TargetFramework)' == 'net10.0-windows'">..\..\docs\cellport.ico</ApplicationIcon>
+    <ApplicationManifest Condition="'$(TargetFramework)' == 'net10.0-windows'">app.manifest</ApplicationManifest>
+    <DefineConstants Condition="'$(TargetFramework)' == 'net10.0-windows'">$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\CellPort.Platform.Windows\CellPort.Platform.Windows.csproj" />
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CellPort.Core\CellPort.Core.csproj" />
+    <ProjectReference Include="..\CellPort.Transport.Serial\CellPort.Transport.Serial.csproj" />
     <ProjectReference Include="..\CellPort.Audio.Core\CellPort.Audio.Core.csproj" />
+    <ProjectReference Include="..\CellPort.Platform.MacOS\CellPort.Platform.MacOS.csproj" Condition="'$(TargetFramework)' != 'net10.0-windows'" />
+    <ProjectReference Include="..\CellPort.Platform.Windows\CellPort.Platform.Windows.csproj" Condition="'$(TargetFramework)' == 'net10.0-windows'" />
   </ItemGroup>
-
   <ItemGroup>
-    <None Update="Assets\**">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <InternalsVisibleTo Include="CellPort.App.Tests" />
   </ItemGroup>
-
 </Project>

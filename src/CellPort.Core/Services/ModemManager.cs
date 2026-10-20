@@ -142,7 +142,7 @@ public sealed class ModemManager : IAsyncDisposable
         // 1) 优先尝试 USB 直控（WinUSB）
         //    若 MI_02 尚未绑定 WinUSB，会在枚举阶段就返回 null（很快）。
         //    这里额外加超时，防止个别驱动状态下 SetupAPI 调用异常拖慢连接。
-        Trace("[1/5] 尝试 USB 直控（WinUSB）…");
+        Trace("[1/5] 尝试平台 USB 直控通道…");
         try
         {
             var usbTask = _channels.TryOpenUsbAsync(ct);
@@ -158,7 +158,7 @@ public sealed class ModemManager : IAsyncDisposable
                 }
                 else
                 {
-                    Trace("      USB 直控不可用（MI_02 未绑定 WinUSB），转串口。");
+                    Trace("      平台未提供可用的 USB 直控通道，转串口。");
                 }
             }
             else

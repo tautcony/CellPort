@@ -1,82 +1,89 @@
-using System.Windows;
-using Microsoft.Win32;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Styling;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 
 namespace CellPort.App.Services;
 
-/// <summary>主题类型。</summary>
-public enum AppTheme
-{
-    /// <summary>跟随系统。</summary>
-    System,
-    /// <summary>深色。</summary>
-    Dark,
-    /// <summary>浅色。</summary>
-    Light,
-}
+public enum AppTheme { System, Dark, Light }
 
-/// <summary>
-/// 主题切换：替换应用级资源字典中的颜色定义。
-/// </summary>
+/// <summary>Applies the shared compact CellPort palette while leaving Fluent's platform control templates intact.</summary>
 public static class ThemeManager
 {
-    private const string ThemeDictKey = "ThemeOverride";
+    private static bool _stylesInstalled;
 
-    private static readonly Uri LightUri =
-        new("pack://application:,,,/Themes/Theme.Light.xaml", UriKind.Absolute);
+    public static void Install(Application app)
+    {
+        if (_stylesInstalled) return;
+        _stylesInstalled = true;
+        app.Styles.Add(StyleFor<Window>(Window.BackgroundProperty, "AppBackground"));
+        app.Styles.Add(new Style(x => x.OfType<TextBlock>())
+        {
+            Setters = { new Setter(TextBlock.FontSizeProperty, 13d), new Setter(TextBlock.ForegroundProperty, Resource("TextPrimary")) }
+        });
+        app.Styles.Add(new Style(x => x.OfType<Button>())
+        {
+            Setters =
+            {
+                new Setter(Control.MinHeightProperty, 32d),
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(10, 5)),
+            }
+        });
+        app.Styles.Add(new Style(x => x.OfType<TextBox>())
+        {
+            Setters = { new Setter(Control.MinHeightProperty, 34d), new Setter(Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, new Thickness(8, 5)) }
+        });
+        app.Styles.Add(new Style(x => x.OfType<Border>())
+        {
+            Setters = { new Setter(Border.BorderBrushProperty, Resource("SurfaceBorder")) }
+        });
+        app.Styles.Add(new Style(x => x.OfType<Border>().Class("app-card"))
+        {
+            Setters =
+            {
+                new Setter(Border.BackgroundProperty, Resource("CardSurface")),
+                new Setter(Border.BorderThicknessProperty, new Thickness(1)),
+                new Setter(Border.CornerRadiusProperty, new CornerRadius(10)),
+            }
+        });
+        app.Styles.Add(new Style(x => x.OfType<StackPanel>().Class("device-card"))
+        {
+            Setters = { new Setter(Panel.BackgroundProperty, Resource("CardSurface")), new Setter(Control.MarginProperty, new Thickness(0)) }
+        });
+        Apply(AppTheme.Dark);
+    }
 
-    /// <summary>
-    /// 应用主题。
-    /// </summary>
     public static void Apply(AppTheme theme)
     {
-        var app = Application.Current;
-        if (app is null)
+        if (Application.Current is not { } app) return;
+        app.RequestedThemeVariant = theme switch
         {
-            return;
-        }
-
-        var effective = theme == AppTheme.System ? DetectSystemTheme() : theme;
-
-        // 移除已有的覆盖字典
-        var existing = app.Resources.MergedDictionaries
-            .FirstOrDefault(d => d.Contains("BgColor") && !ReferenceEquals(d, app.Resources.MergedDictionaries[0]));
-        if (existing is not null)
-        {
-            app.Resources.MergedDictionaries.Remove(existing);
-        }
-
-        if (effective == AppTheme.Light)
-        {
-            var dict = new ResourceDictionary { Source = LightUri };
-            app.Resources.MergedDictionaries.Add(dict);
-        }
-
-        // 更新所有 DynamicResource 引用
-        foreach (Window window in app.Windows)
-        {
-            window.InvalidateVisual();
-        }
-    }
-
-    /// <summary>
-    /// 读取系统主题偏好。
-    /// </summary>
-    public static AppTheme DetectSystemTheme()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            var value = key?.GetValue("AppsUseLightTheme");
-            if (value is int i)
+            AppTheme.Dark => ThemeVariant.Dark,
+            AppTheme.Light => ThemeVariant.Light,
+            _ => ThemeVariant.Default,
+        };
+        var dark = theme == AppTheme.Dark || (theme == AppTheme.System && app.ActualThemeVariant == ThemeVariant.Dark);
+        var colors = dark
+            ? new Dictionary<string, string>
             {
-                return i == 0 ? AppTheme.Dark : AppTheme.Light;
+                ["AppBackground"] = "#1C1C1E", ["SidebarSurface"] = "#232326", ["CardSurface"] = "#2C2C2E",
+                ["HoverSurface"] = "#34343A", ["SurfaceBorder"] = "#3A3A3E", ["TextPrimary"] = "#F2F2F7",
+                ["TextSecondary"] = "#98989F", ["Accent"] = "#0A84FF", ["Success"] = "#30D158",
+                ["Warning"] = "#FF9F0A", ["Danger"] = "#FF453A",
             }
-        }
-        catch
-        {
-            // 读取失败按深色处理
-        }
-        return AppTheme.Dark;
+            : new Dictionary<string, string>
+            {
+                ["AppBackground"] = "#F2F2F7", ["SidebarSurface"] = "#E8E8ED", ["CardSurface"] = "#FFFFFF",
+                ["HoverSurface"] = "#E5E5EA", ["SurfaceBorder"] = "#D1D1D6", ["TextPrimary"] = "#1C1C1E",
+                ["TextSecondary"] = "#6C6C70", ["Accent"] = "#007AFF", ["Success"] = "#248A3D",
+                ["Warning"] = "#9A6700", ["Danger"] = "#D70015",
+            };
+        foreach (var (key, color) in colors) app.Resources[key] = new SolidColorBrush(Color.Parse(color));
     }
+
+    private static Style StyleFor<T>(AvaloniaProperty property, string resource) where T : Control =>
+        new(x => x.OfType<T>()) { Setters = { new Setter(property, Resource(resource)) } };
+
+    private static DynamicResourceExtension Resource(string key) => new(key);
 }

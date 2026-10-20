@@ -16,7 +16,7 @@ Write-Host "仓库: $RepoRoot"
 
 Push-Location $RepoRoot
 try {
-    # 1) framework-dependent（需要 .NET 10 Desktop Runtime，体积小）
+    # 1) framework-dependent（需要 .NET 10 Runtime，体积小；Avalonia 不依赖 WPF Desktop Runtime）
     Write-Host "`n==> [1/2] framework-dependent" -ForegroundColor Yellow
     & $Dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained false -o dist/framework-dependent
     if ($LASTEXITCODE -ne 0) { throw "publish framework-dependent 失败" }

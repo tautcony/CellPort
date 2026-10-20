@@ -1,17 +1,27 @@
 # CellPort
 
+**Portable Avalonia desktop app:** the canonical `CellPort.App` provides all six
+pages on Windows and macOS. macOS matches known module VID/PID and IOKit location
+for libusb AT access, with system serial fallback; WinUSB and driver tools remain
+Windows-only. The `osx-arm64` app has connected to a QDC507 and read device, SIM and
+network status. SMS, USSD, eSIM writes, calls and media still need separate hardware
+validation. See [macOS notes](docs/macos.md) and the [migration matrix](docs/avalonia-migration.md).
+
 **[简体中文](README.md) | English**
 
-**A Windows-native manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile switching · AT console.**
+**A portable Avalonia manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile management · AT console.**
 
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-blue)
-![.NET](https://img.shields.io/badge/.NET-10.0%20WPF-512BD4)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
+![.NET](https://img.shields.io/badge/.NET-10.0%20Avalonia-512BD4)
 ![Release](https://img.shields.io/github/v/release/xmgzxmgz/CellPort)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-CellPort is a **Windows-native** (no WSL required) manager for the DJI 1st-gen 4G module,
-feature-matched to CellDock on macOS: SMS, voice calls, device status,
-**eSIM / eUICC profile management (including switching)** and an AT console.
+CellPort is an **Avalonia desktop manager** for the DJI 1st-gen 4G module on Windows and macOS:
+SMS, call controls, device status, **eSIM / eUICC profile management**, an AT console,
+privacy and forwarding settings. All six pages use the canonical `CellPort.App` project.
+macOS uses libusb direct access for known modules, with system serial fallback.
+WinUSB direct access and driver binding are available on Windows.
+The call page keeps media availability truthful: the current host supports call control only.
 
 > The hardware is the DJI 4G module gen-1 (in fact a Quectel EG25-G / MDM9607 core).
 > Any EG25-G / EC25 series module should work in theory.
@@ -20,7 +30,7 @@ feature-matched to CellDock on macOS: SMS, voice calls, device status,
 
 | Package | When to use |
 |---|---|
-| `CellPort-v*-win-x64.zip` (~0.4 MB) | You already have [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| `CellPort-v*-win-x64.zip` (~0.4 MB) | You already have [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
 | `CellPort-v*-win-x64-selfcontained.zip` (~60 MB) | No runtime needed — unzip and run |
 
 Unzip and run `CellPort.exe`.
@@ -30,8 +40,8 @@ Unzip and run `CellPort.exe`.
 - **SMS**: receive (`+CMTI` / `+CMT` unsolicited), send (PDU mode), long-SMS (UDH 8/16-bit) reassembly,
   UCS2 Chinese, GSM 7-bit packing, conversation-style UI
 - **Voice calls**: dial, answer, hang up, DTMF, mute, call log
-- **Device status**: model, firmware, operator, signal (dBm/%), network mode, band, SIM state,
-  IMEI / ICCID / IMSI / own number, registration, data attach, USB interface list
+- **Device status**: model, firmware, operator, signal (RSSI / dBm / %), network mode, SIM state,
+  IMEI / ICCID / IMSI / own number, registration, data attach, USB mode and platform diagnostics
 - **eSIM / eUICC** (the core of this project):
   - Logical-channel access: EID (dual path) + profile list (ICCID / carrier / ISD-P AID / state / class)
   - **Profile enable / disable switching** (verified on real hardware), with guided module reboot & auto-reconnect
@@ -112,7 +122,7 @@ waits for ports, reconnects and re-reads the profile list.
 
 ## Connection strategy
 
-The QDC507 exposes 6 serial ports (COM4~COM9); the AT port drifts between COM6/COM7 and
+On the tested Windows QDC507 unit, six serial ports are exposed (COM4~COM9); the AT port drifts between COM6/COM7 and
 COM8/COM9 are Bluetooth virtual ports (`BTHENUM`, filtered out). Pipeline:
 
 | Scenario | Latency | Notes |
@@ -124,17 +134,21 @@ Failure logs: `%APPDATA%\CellPort\last-connect.log` (full `[1/5]`~`[5/5]` trace)
 
 ## Build & run
 
-Requirements: Windows 10+, [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
-Quectel USB driver (usually bundled with Windows).
+Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). The default
+`CellPort.sln` is the portable solution and contains the canonical Avalonia app. Windows-only
+diagnostic projects are in `CellPort.Windows.sln`.
 
 ```bash
 git clone https://github.com/xmgzxmgz/CellPort.git
 cd CellPort
 dotnet build CellPort.sln -c Release
-dotnet run --project src/CellPort.App
+./scripts/run-mac.sh --page device       # macOS
+dotnet run --project src/CellPort.App -f net10.0-windows -- --page device  # Windows
 ```
 
-Or `scripts/publish.ps1` for double-config packaging; `dotnet test` for the unit tests.
+On Windows, Quectel USB drivers may be required for serial-port access. Publish a Windows
+package with `scripts/publish.ps1`; create a self-contained macOS `.app` with
+`./scripts/publish-mac.sh`.
 
 > Tip: launching directly triggers auto-connect; `CellPort.exe --page esim` opens a specific page
 > (sms / calls / device / esim / console / settings).

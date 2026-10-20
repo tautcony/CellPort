@@ -1,0 +1,14 @@
+{
+  "solution": {
+    "path": "CellPort.sln",
+    "projects": [
+      "src/CellPort.App/CellPort.App.csproj",
+      "src/CellPort.Core/CellPort.Core.csproj",
+      "src/CellPort.Audio.Core/CellPort.Audio.Core.csproj",
+      "src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj",
+      "src/CellPort.Platform.MacOS/CellPort.Platform.MacOS.csproj",
+      "tests/CellPort.Platform.MacOS.Tests/CellPort.Platform.MacOS.Tests.csproj",
+      "tests/CellPort.App.Tests/CellPort.App.Tests.csproj"
+    ]
+  }
+}

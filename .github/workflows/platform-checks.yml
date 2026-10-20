@@ -22,6 +22,10 @@ jobs:
           dotnet-version: 10.0.x
       - name: Test portable core (no hardware)
         run: dotnet test tests/CellPort.Core.Tests/CellPort.Core.Tests.csproj -c Release --nologo
+      - name: Build portable canonical app
+        run: dotnet build CellPort.sln -c Release --nologo
+      - name: Test headless app workflows
+        run: dotnet test tests/CellPort.App.Tests/CellPort.App.Tests.csproj -c Release --nologo
       - name: Test portable audio contracts (no hardware)
         run: dotnet test tests/CellPort.Audio.Core.Tests/CellPort.Audio.Core.Tests.csproj -c Release --nologo
       - name: Test Linux USB identity and selectors (synthetic sysfs, no hardware)
@@ -32,6 +36,28 @@ jobs:
         run: dotnet build src/CellPort.Platform.Linux/CellPort.Platform.Linux.csproj -c Release --nologo
       - name: Build portable serial transport
         run: dotnet build src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj -c Release --nologo
+      - name: Test macOS serial discovery (no hardware)
+        run: dotnet test tests/CellPort.Platform.MacOS.Tests/CellPort.Platform.MacOS.Tests.csproj -c Release --nologo
+
+  macos-host:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build macOS host and adapter
+        run: dotnet build CellPort.Mac.slnf -c Release --nologo
+      - name: Package self-contained app
+        run: bash scripts/publish-mac.sh
+      - name: Cross-publish canonical Windows app
+        run: dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained false -p:EnableWindowsTargeting=true -o dist/platform-check/windows-framework --nologo
+      - name: Archive app preserving executable permissions
+        run: ditto -c -k --sequesterRsrc --keepParent dist/osx-*/CellPort.app dist/CellPort-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CellPort-macos
+          path: dist/CellPort-macos.zip
 
   windows-hosts:
     runs-on: windows-latest
@@ -40,8 +66,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - name: Build all Windows hosts
-        run: dotnet build CellPort.sln -c Release --nologo
+      - name: Build Windows hosts, tools, and diagnostics
+        run: dotnet build CellPort.Windows.sln -c Release --nologo
       - name: Publish framework-dependent
         run: dotnet publish src/CellPort.App/CellPort.App.csproj -c Release -r win-x64 --self-contained false -o dist/platform-check/framework-dependent
       - name: Publish self-contained

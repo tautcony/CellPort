@@ -2,15 +2,16 @@
 
 **[English](README.en.md) | 简体中文**
 
-**A Windows-native manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile switching · AT console.**
+**A portable Avalonia manager for DJI 1st-gen 4G modules (Quectel EG25-G) — SMS · Calls · Device info · eSIM / eUICC profile management · AT console.**
 
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-blue)
-![.NET](https://img.shields.io/badge/.NET-10.0%20WPF-512BD4)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
+![.NET](https://img.shields.io/badge/.NET-10.0%20Avalonia-512BD4)
 ![Release](https://img.shields.io/github/v/release/xmgzxmgz/CellPort)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-CellPort 是一款 **Windows 原生**（不依赖 WSL）的大疆一代 4G 模块管理器，功能对标 macOS 上的 CellDock：
-短信收发、语音通话、设备状态、**eSIM / eUICC Profile 管理（含切卡）** 与 AT 控制台。
+CellPort 是一款使用 **Avalonia** 的大疆一代 4G 模块管理器，提供 Windows 与 macOS 桌面入口：短信收发、语音通话控制、设备状态、**eSIM / eUICC Profile 管理**、AT 控制台、隐私和转发设置。六个页面共用一个 `CellPort.App`；macOS 通过 libusb VID/PID 匹配已知模块并连接 AT 接口，也可回退到系统串口；WinUSB 和驱动绑定仅在 Windows 提供。
+
+macOS `osx-arm64` 版本已在 QDC507 (`2CA3:4006`) 上通过接口 2 连接，并读取设备、SIM 和网络状态。短信、USSD、eSIM 写入、通话及媒体流程仍需分别验证。通话页面保留控制与状态显示；媒体通路仍按运行时能力显示为不可用（仅控制）。
 
 > 硬件为大疆 4G 模块一代（实为 Quectel EG25-G / MDM9607 内核），
 > 理论上兼容所有 EG25-G / EC25 系列模组。
@@ -19,7 +20,7 @@ CellPort 是一款 **Windows 原生**（不依赖 WSL）的大疆一代 4G 模�
 
 | 包 | 适用场景 |
 |---|---|
-| `CellPort-v*-win-x64.zip`（约 0.4 MB） | 已装 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)，体积小 |
+| `CellPort-v*-win-x64.zip`（约 0.4 MB） | 已装 [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)，体积小 |
 | `CellPort-v*-win-x64-selfcontained.zip`（约 60 MB） | 免装运行时，解压即用 |
 
 解压运行 `CellPort.exe` 即可。
@@ -31,8 +32,8 @@ CellPort 是一款 **Windows 原生**（不依赖 WSL）的大疆一代 4G 模�
 - **短信**：接收（`+CMTI` / `+CMT` 主动上报）、发送（PDU 模式）、长短信（UDH 8/16-bit）自动拼接、
   UCS2 中文、GSM 7-bit 打包、会话式双栏界面
 - **语音通话**：拨号、接听、挂断、DTMF、静音、通话记录
-- **设备状态**：型号、固件、运营商、信号（dBm/%）、网络制式、频段、SIM 状态、
-  IMEI / ICCID / IMSI / 本机号码、注册状态、数据附着、USB 接口列表
+- **设备状态**：型号、固件、运营商、信号（RSSI / dBm / %）、网络制式、SIM 状态、
+  IMEI / ICCID / IMSI / 本机号码、注册状态、数据附着、USB 模式与平台接口诊断
 - **eSIM / eUICC**（本项目的核心）：
   - 逻辑通道读取：EID（双路径）+ Profile 列表（ICCID / 运营商 / ISD-P AID / 状态 / 类别）
   - **Profile 启用 / 停用切卡**（真机验证通过），写入后引导重启模块并自动重连
@@ -109,7 +110,7 @@ BF31 <len> A0 <len> 4F <len> <ISD-P AID> 81 01 00     ← refreshFlag = FALSE
 
 ## 连接策略
 
-QDC507 向系统暴露 6 个串口（COM4~COM9），其中 AT 口在 COM6/COM7 之间漂移，
+在已测试的 Windows QDC507 设备上，系统暴露 6 个串口（COM4~COM9），其中 AT 口在 COM6/COM7 之间漂移，
 COM8/COM9 是蓝牙虚拟口（`BTHENUM`，应剔除）。本项目的连接流水线：
 
 | 场景 | 耗时 | 说明 |
@@ -121,6 +122,33 @@ COM8/COM9 是蓝牙虚拟口（`BTHENUM`，应剔除）。本项目的连接流�
 
 ## 构建与运行
 
+### macOS
+
+安装 .NET 10 SDK 后，在项目根目录运行：
+
+```bash
+./scripts/run-mac.sh
+```
+
+没有接入模块时也能正常打开窗口。macOS 通过 libusb 直连已知模块，串口回退使用 `/dev/cu.*`；不载入 Windows WMI 或 WinUSB 实现。
+
+```bash
+# 从同一 Avalonia 应用运行；支持 --page sms/calls/device/esim/console/settings
+./scripts/run-mac.sh --page device
+
+# 默认便携 solution；Windows 专用诊断 solution
+dotnet build CellPort.sln -c Release
+dotnet build CellPort.Windows.sln -c Release
+
+# 打包本机架构的 self-contained .app
+./scripts/publish-mac.sh
+open dist/osx-arm64/CellPort.app
+```
+
+`CellPort.sln` 是日常便携入口，包含 canonical `CellPort.App`；Windows 专用诊断工具位于 `CellPort.Windows.sln`。macOS 使用 libusb 直连与 `/dev/cu.*` 串口回退，不载入 Windows WMI 或 WinUSB 实现。运行和验证边界见 [macOS 运行说明](docs/macos.md)。
+
+### Windows
+
 需求：Windows 10+、[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)、
 Quectel USB 驱动（插上模块 Windows 一般自带）。
 
@@ -128,10 +156,10 @@ Quectel USB 驱动（插上模块 Windows 一般自带）。
 git clone https://github.com/xmgzxmgz/CellPort.git
 cd CellPort
 dotnet build CellPort.sln -c Release
-dotnet run --project src/CellPort.App
+dotnet run --project src/CellPort.App -f net10.0-windows -- --page device
 ```
 
-或直接 `dotnet publish src/CellPort.App -c Release -o dist` 后运行 `dist\CellPort.exe`。
+或在 Windows 上用 `dotnet publish src/CellPort.App -f net10.0-windows -c Release -o dist` 后运行 `dist\CellPort.exe`。
 
 > 提示：直接双击启动会触发自动连接；`CellPort.exe --page esim` 可直接打开指定页面
 > （sms / calls / device / esim / console / settings）。
@@ -140,7 +168,8 @@ dotnet run --project src/CellPort.App
 
 ```
 CellPort/
-├── CellPort.sln
+├── CellPort.sln               # portable default solution
+├── CellPort.Windows.sln       # Windows-only diagnostic projects
 ├── src/
 │   ├── CellPort.Core/          # 核心库（无 UI 依赖）
 │   │   ├── At/                 #   AT 引擎、SMS PDU 编解码
@@ -149,18 +178,23 @@ CellPort/
 │   │   └── Services/           #   ModemManager / DeviceInfo / Sms / Call
 │   │                           #   LogicalChannelEs10 (CCHO/CGLA + ES10c) / BerTlv
 │   │                           #   Cusd / Phonebook / SmsExport / AppLog / UpdateCheck
-│   └── CellPort.App/           # WPF 界面（深浅主题、六页面）
+│   ├── CellPort.App/           # canonical Avalonia 应用（六页面）
+│   ├── CellPort.Platform.Windows/ # Windows USB/诊断
+│   └── CellPort.Platform.MacOS/   # macOS USB AT 与串口实现
 ├── tests/
-│   └── CellPort.Core.Tests/    # 单元测试（GSM7 / ES10c 编码 / BCD / 导出）
+│   ├── CellPort.Core.Tests/    # Core 协议与业务测试
+│   └── CellPort.App.Tests/     # Avalonia headless 页面测试
 ├── tools/
 │   ├── PortProbe/              # 串口枚举 + AT 探测（排障用）
 │   ├── EsimProbe/              # eUICC 全链路验证（读取 + 切卡回环测试）
 │   ├── DiagTool/               # 连接诊断
 │   └── E2E/                    # 端到端真机测试
 ├── scripts/
-│   └── publish.ps1             # 本地双配置打包（framework/self-contained）
+│   ├── publish.ps1             # Windows framework/self-contained 发布
+│   ├── run-mac.sh              # canonical Avalonia 应用启动
+│   └── publish-mac.sh          # self-contained macOS .app
 ├── .github/workflows/          # push tag 自动测试 + 构建 + 发布 Release
-└── docs/                       # 截图（已脱敏）
+└── docs/                       # 迁移矩阵、平台边界和脱敏截图
 ```
 
 ## 已知限制

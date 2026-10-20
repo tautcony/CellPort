@@ -1,6 +1,6 @@
 # 平台边界与兼容回归
 
-`isolate-platform-dependencies` 只隔离实现，不增加音频或 Linux/macOS 设备支持。其后续音频工作将 Windows App 和公共契约基线升级到 .NET 10；此处记录当前项目边界。
+当前 canonical app 是 Avalonia `CellPort.App`。macOS 通过 VID/PID 和 IOKit location 匹配模块，以 libusb 打开 AT 接口，并回退到系统串口；Windows 保留 USB/WinUSB 功能。`CellPort.sln` 是默认便携 solution；Windows 专用诊断宿主和工具在 `CellPort.Windows.sln`。迁移页面行为与验收状态见 [Avalonia 迁移矩阵](avalonia-migration.md)。
 
 | 项目 | 目标 | 职责 |
 | --- | --- | --- |
@@ -8,11 +8,15 @@
 | CellPort.Audio.Core | net10.0 | 跨平台音频会话、设备、运行时、媒体契约与不可变结果模型 |
 | CellPort.Transport.Serial | net10.0 | System.IO.Ports 传输及串口枚举，不引用 Windows 项目 |
 | CellPort.Platform.Windows | net10.0-windows | WinUSB、SetupAPI、WMI/PnP、Windows 串口发现策略 |
-| CellPort.App / 现有工具 | net10.0-windows | Windows UI/入口装配；PortProbe 仍为独立 Windows 诊断工具 |
+| CellPort.App | net10.0 / net10.0-windows | canonical Avalonia UI；Windows target 条件装配 WinUSB provider |
+| CellPort.Platform.MacOS | net10.0 | macOS libusb VID/PID 识别、AT USB 接口与 `/dev/cu.*` 串口回退，不引用 Windows 项目 |
+| Windows diagnostic tools | net10.0-windows | 独立排障工具，只收录于 `CellPort.Windows.sln` |
 
-宿主使用 `new ModemManager(new WindowsAtChannelProvider())`。Core 不提供默认平台实例，也不通过静态注册/反射寻找实现。外部源码调用方需更新构造函数和迁移类型的命名空间；这不保持旧程序集二进制 API 兼容。
+macOS 启动、打包与验证边界见 [macos.md](macos.md)。
 
-`IAtChannelProvider` 将 USB 尝试、串口发现和创建隔离，现有 `IAtChannel` 继续承载传输。端口路径由提供者原样返回，比较规则由其 `PortNameComparer` 给出。Windows 使用 OrdinalIgnoreCase；Unix 宿主应按真实标识语义选择比较器。ModuleScanner/ModuleDiscoveryResult 是 Windows 诊断 API，WPF 可直接引用，不应作为通用强身份契约。
+宿主通过 `CellPort.App.Services.PlatformServices` 创建 `IAtChannelProvider` 并提供 USB/串口枚举和诊断动作。Core 不提供默认平台实例，也不通过静态注册/反射寻找实现。外部源码调用方需更新构造函数和迁移类型的命名空间；这不保持旧程序集二进制 API 兼容。
+
+`IAtChannelProvider` 将 USB 尝试、串口发现和创建隔离，现有 `IAtChannel` 继续承载传输。端口路径由提供者原样返回，比较规则由其 `PortNameComparer` 给出。Windows 使用 OrdinalIgnoreCase；Unix 宿主按真实标识语义选择比较器。`ModuleScanner` / `ModuleDiscoveryResult` 是 Windows 诊断 API；共用 UI 只接收平台服务提供的诊断文本，不引用 Windows 类型。
 
 Windows 连接仍依次尝试 USB、指定串口或历史端口、其余端口并行探测；保留原蓝牙过滤、缓存、超时、端口记忆和初始化命令。原有扫描去重/StableKey、超时后后台打开任务等局限未在本次改写。后续音频身份绑定不得依赖旧 StableKey。
 
@@ -23,11 +27,14 @@ Windows 连接仍依次尝试 USB、指定串口或历史端口、其余端口�
 ```text
 dotnet test tests/CellPort.Core.Tests/CellPort.Core.Tests.csproj -c Release
 dotnet test tests/CellPort.Audio.Core.Tests/CellPort.Audio.Core.Tests.csproj -c Release
+dotnet test tests/CellPort.App.Tests/CellPort.App.Tests.csproj -c Release
 dotnet build src/CellPort.Audio.Core/CellPort.Audio.Core.csproj -c Release
 dotnet build src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj -c Release
 ```
 
-Windows 另外执行 solution build 与两种 publish，见 `.github/workflows/platform-checks.yml`。模拟通道测试验证连接顺序、失败释放、初始化命令、状态/连接事件、端口记忆以及大小写策略；原短信编码/导出、eSIM 编码、更新检测测试继续运行。架构测试禁止 Core 引用平台实现、System.Management/System.IO.Ports/WPF 或包含 P/Invoke。
+Windows 另外构建 `CellPort.Windows.sln` 与 Windows target 发布，见 `.github/workflows/platform-checks.yml`。模拟通道测试验证连接顺序、失败释放、初始化命令、状态/连接事件、端口记忆以及大小写策略；原短信编码/导出、eSIM 编码、更新检测测试继续运行。架构测试禁止 Core 引用平台实现、System.Management/System.IO.Ports/WPF 或包含 P/Invoke。
+
+以下各节保留平台隔离与音频 change 当时的验证记录和设计文字。它们描述的是本次 Avalonia UI 迁移之前的代码状态，不应作为当前界面、solution 或打包结果。
 
 ## 前置 change 的历史验证记录
 
@@ -52,9 +59,9 @@ Windows 另外执行 solution build 与两种 publish，见 `.github/workflows/p
 - Audio.Core 纯逻辑测试项目在 Windows 主机分别以 linux-x64 和 osx-x64 RID 成功构建。
 - Linux/macOS 的 matrix job 已配置，但本记录尚无这两种操作系统的 CI 结果。Inno Setup 编译器在本机不可用，因此安装脚本仅完成源码更新与检查，未编译安装器。
 
-## .NET 10 音频 change 更新
+## .NET 10 音频 change 更新（迁移前的历史描述）
 
-Audio.Core 与纯逻辑测试以 net10.0 为目标，不引用 WPF、System.Management 或 System.IO.Ports。Windows App 继续以 net10.0-windows/WPF 构建，并引用 Audio.Core 与 Platform.Windows。可移植 CI 矩阵在 Windows、Ubuntu 和 macOS 上运行 Core/Audio.Core 测试并构建 Audio.Core；Windows job 另构建 solution，并发布 framework-dependent 与 self-contained win-x64 包。
+Audio.Core 与纯逻辑测试以 net10.0 为目标，不引用 WPF、System.Management 或 System.IO.Ports。当时 Windows App 仍以 net10.0-windows/WPF 构建，并引用 Audio.Core 与 Platform.Windows；这段文字是迁移前记录。可移植 CI 矩阵在 Windows、Ubuntu 和 macOS 上运行 Core/Audio.Core 测试并构建 Audio.Core；Windows job 另构建 solution，并发布 framework-dependent 与 self-contained win-x64 包。
 
 ## 发布前人工冒烟
 
