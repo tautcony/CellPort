@@ -1,0 +1,71 @@
+.github/workflows/platform-checks.yml
+  s_270a2e06a37363::t_4106bfb73f9457 52-61
+src/CellPort.App/Services/PlatformServices.cs
+  s_6a60e72029f0da::t_e6d2d8a72d6706 3,16
+  s_6a60e72029f0da::t_9d8d859217b2d3 2,7,15,18-19,21-24,26-27,29-30,34-38
+src/CellPort.Platform.Linux/LinuxPlatformServices.cs
+  s_6a60e72029f0da::t_71f3c3e104d189 1-18,21-32
+  s_6a60e72029f0da::t_cefd7c2c2011c8 19-20
+src/CellPort.Platform.Runtime/PlatformAdapterFactory.cs
+  s_6a60e72029f0da::t_e6d2d8a72d6706 1-23
+src/CellPort.Platform.MacOS/MacPlatformServices.cs
+  s_6a60e72029f0da::t_71f3c3e104d189 1-16,19-31
+  s_6a60e72029f0da::t_cefd7c2c2011c8 17-18
+src/CellPort.Platform.Windows/WindowsPlatformServices.cs
+  s_6a60e72029f0da::t_71f3c3e104d189 1-37
+src/CellPort.Platform.Windows/CellPort.Platform.Windows.csproj
+  s_6a60e72029f0da::t_4dafe32438eea0 11
+scripts/publish-mac.sh
+  s_270a2e06a37363::t_4106bfb73f9457 28-37,40-45
+CellPort.slnx
+  s_270a2e06a37363::t_38e3486671159f 14
+  s_6a60e72029f0da::t_6a84ef64436601 13
+src/CellPort.Platform.Runtime/CellPort.Platform.Runtime.csproj
+  s_6a60e72029f0da::t_7db67ed1a8aa96 3-4
+  s_6a60e72029f0da::t_e6d2d8a72d6706 1-2,5-14,16-19
+  s_6a60e72029f0da::t_c2b5b75cf04f72 15
+src/CellPort.Platform.Linux/CellPort.Platform.Linux.csproj
+  s_6a60e72029f0da::t_4dafe32438eea0 12-13
+src/CellPort.Platform.Abstractions/CellPort.Platform.Abstractions.csproj
+  s_6a60e72029f0da::t_b7700ca28f2207 1-11
+src/CellPort.Platform.Linux/LinuxAtChannelProvider.cs
+  s_6a60e72029f0da::t_71f3c3e104d189 1-110
+src/CellPort.App/Views/DevicePage.cs
+  s_6a60e72029f0da::t_9d8d859217b2d3 98,119,265-268,377-378
+tests/CellPort.App.Tests/DevicePageTests.cs
+  s_6a60e72029f0da::t_cefd7c2c2011c8 8,17,20,30,33,135
+src/CellPort.App/CellPort.App.csproj
+  s_270a2e06a37363::t_16c30690be6baf 25
+src/CellPort.Platform.MacOS/CellPort.Platform.MacOS.csproj
+  s_6a60e72029f0da::t_4dafe32438eea0 8-9
+src/CellPort.Platform.Abstractions/IPlatformServices.cs
+  s_6a60e72029f0da::t_cefd7c2c2011c8 22-35
+  s_6a60e72029f0da::t_b7700ca28f2207 1-21,36-71
+docs/platform-boundaries.md
+  s_6a60e72029f0da::t_6a84ef64436601 3,13-14
+  s_6a60e72029f0da::t_e6d2d8a72d6706 10-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e89e20aade6f4a51f57cd08b354126a52c5762d",
+  "prompts": {},
+  "sessions": {
+    "s_270a2e06a37363": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1584a-eb6c-7b02-ab48-8ee8b9615978",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    },
+    "s_6a60e72029f0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1585c-7d5b-7ce3-8fc0-c1c7ae65c8b8",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    }
+  }
+}
