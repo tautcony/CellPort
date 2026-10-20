@@ -5,6 +5,7 @@ using CellPort.App.Services;
 using CellPort.App.Views;
 using CellPort.Core.Services;
 using CellPort.Core.Transport;
+using CellPort.Platform.Abstractions;
 
 namespace CellPort.App.Tests;
 
@@ -13,10 +14,10 @@ public sealed class DevicePageTests
     [Fact]
     public void DiagnosticsDistinguishNoSerialNodesAtFailureAndDisappearedSelection()
     {
-        var macEmpty = PlatformServices.FormatMacSerialDiagnostics([]);
+        var macEmpty = PlatformDiagnosticFormatter.FormatSerialDiagnostics([]);
         Assert.Equal("未发现串口。", macEmpty);
 
-        var macWithPort = PlatformServices.FormatMacSerialDiagnostics(["/dev/cu.usbserial-test"]);
+        var macWithPort = PlatformDiagnosticFormatter.FormatSerialDiagnostics(["/dev/cu.usbserial-test"]);
         Assert.Equal("/dev/cu.usbserial-test", macWithPort);
 
         var noSerial = PlatformServices.DescribeConnectionFailure(null, []);
@@ -26,10 +27,10 @@ public sealed class DevicePageTests
         Assert.Equal("检测到 1 个串口，模块未响应。", noAtResponse);
 
         var qdcDevice = new[] { "QDC507 · 2CA3:4006" };
-        Assert.Equal("QDC507 · 2CA3:4006", PlatformServices.FormatMacDiagnostics(qdcDevice, []));
+        Assert.Equal("QDC507 · 2CA3:4006", PlatformDiagnosticFormatter.FormatDeviceDiagnostics(qdcDevice, []));
         var qdcFailure = OperatingSystem.IsMacOS() ? "QDC507 未响应。" : "未发现串口。";
         Assert.Equal(qdcFailure, PlatformServices.DescribeConnectionFailure(null, [], qdcDevice));
-        Assert.Equal("未发现设备。", PlatformServices.FormatMacDiagnostics([], []));
+        Assert.Equal("未发现设备。", PlatformDiagnosticFormatter.FormatDeviceDiagnostics([], []));
 
         var disappeared = PlatformServices.DescribeConnectionFailure("/dev/cu.old", ["/dev/cu.current"]);
         Assert.Equal("串口已断开：/dev/cu.old", disappeared);
@@ -131,7 +132,7 @@ public sealed class DevicePageTests
     [AvaloniaFact]
     public async Task ReconnectDistinguishesMissingMacSerialNodesFromUnresponsiveEnumeratedPorts()
     {
-        PlatformServices.DiagnosticsOverride = () => PlatformServices.FormatMacSerialDiagnostics([]);
+        PlatformServices.DiagnosticsOverride = () => PlatformDiagnosticFormatter.FormatSerialDiagnostics([]);
         PlatformServices.SerialPortsOverride = () => [];
         PlatformServices.UsbDevicesOverride = () => [];
         var noNodesFailure = PlatformServices.DescribeConnectionFailure(null, [], []);

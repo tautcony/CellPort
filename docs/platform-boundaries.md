@@ -1,14 +1,17 @@
 # 平台边界与兼容回归
 
-当前 canonical app 是 Avalonia `CellPort.App`。macOS 通过 VID/PID 和 IOKit location 匹配模块，以 libusb 打开 AT 接口，并回退到系统串口；Windows 保留 USB/WinUSB 功能。`CellPort.slnx` 是唯一完整 solution，收录所有平台适配器、测试和工具；`CellPort.Mac.slnf` 提供 macOS 日常开发所需的过滤视图。迁移页面行为与验收状态见 [Avalonia 迁移矩阵](avalonia-migration.md)。
+当前 canonical app 是 Avalonia `CellPort.App`。App 只依赖 `CellPort.Platform.Abstractions`，运行时由该层选择 Windows、macOS 或 Linux 适配器。macOS 通过 VID/PID 和 IOKit location 匹配模块，以 libusb 打开 AT 接口，并回退到系统串口；Linux 通过 sysfs 识别 USB 模块及其 AT 串口；Windows 保留 USB/WinUSB 功能。`CellPort.slnx` 是唯一完整 solution，收录所有平台适配器、测试和工具；`CellPort.Mac.slnf` 提供 macOS 日常开发所需的过滤视图。迁移页面行为与验收状态见 [Avalonia 迁移矩阵](avalonia-migration.md)。
 
 | 项目 | 目标 | 职责 |
 | --- | --- | --- |
 | CellPort.Core | net10.0 | AT、短信、通话、eSIM、业务模型和 IAtChannel/IAtChannelProvider |
 | CellPort.Audio.Core | net10.0 | 跨平台音频会话、设备、运行时、媒体契约与不可变结果模型 |
 | CellPort.Transport.Serial | net10.0 | System.IO.Ports 传输及串口枚举，不引用 Windows 项目 |
+| CellPort.Platform.Abstractions | net10.0 | IPlatformServices 与共享平台诊断契约 |
+| CellPort.Platform.Runtime | net10.0 / net10.0-windows | 唯一的适配器组合入口；由运行时系统选择平台实现 |
 | CellPort.Platform.Windows | net10.0-windows | WinUSB、SetupAPI、WMI/PnP、Windows 串口发现策略 |
-| CellPort.App | net10.0 / net10.0-windows | canonical Avalonia UI；Windows target 条件装配 WinUSB provider |
+| CellPort.Platform.Linux | net10.0 | sysfs USB/接口枚举、Linux AT 串口探测和 Linux 系统设备入口 |
+| CellPort.App | net10.0 / net10.0-windows | canonical Avalonia UI；通过 IPlatformServices 使用平台能力，不直接引用平台实现 |
 | CellPort.Platform.MacOS | net10.0 | macOS libusb VID/PID 识别、AT USB 接口与 `/dev/cu.*` 串口回退，不引用 Windows 项目 |
 | Windows diagnostic tools | net10.0-windows | Windows 专用排障工具，收录于统一的 `CellPort.slnx` |
 

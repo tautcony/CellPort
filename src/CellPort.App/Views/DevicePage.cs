@@ -95,7 +95,7 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
         var scanRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
         Grid.SetColumn(RescanButton, 1);
         scanRow.Children.Add(RescanButton);
-        if (!PlatformServices.CanBindWinUsb)
+        if (!PlatformServices.SupportsUsbDriverBinding)
         {
             Grid.SetColumn(OpenDeviceManagerButton, 2);
             scanRow.Children.Add(OpenDeviceManagerButton);
@@ -116,7 +116,7 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
         CardContent(serial).Children.Add(ChannelStatus);
 
         Border? driver = null;
-        if (PlatformServices.CanBindWinUsb)
+        if (PlatformServices.SupportsUsbDriverBinding)
         {
             driver = Card("驱动");
             var driverRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -256,23 +256,16 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
 
     private async Task OpenDeviceManagerAsync()
     {
-        if (!PlatformServices.CanBindWinUsb)
-        {
-            PlatformServices.OpenSystemDeviceManager();
-            return;
-        }
         try { PlatformServices.OpenSystemDeviceManager(); }
         catch (Exception ex) { await DialogService.ShowAsync(this, $"无法打开设备管理器：{ex.Message}", "错误"); }
     }
 
     private async Task OpenDriverSetupAsync()
     {
-        if (!PlatformServices.CanBindWinUsb)
-        {
-            await DialogService.ShowAsync(this, "macOS 不支持 WinUSB 绑定。请通过系统串口服务连接模块。", "平台不支持");
-            return;
-        }
-        await PlatformServices.ShowDriverSetupAsync(this);
+        var instructions = PlatformServices.GetDriverSetupInstructions();
+        await DialogService.ShowAsync(this,
+            instructions ?? "当前平台不支持 USB 驱动绑定设置。",
+            instructions is null ? "平台不支持" : "WinUSB 驱动设置");
     }
 
     private async Task SendUssdAsync()
@@ -381,8 +374,8 @@ public sealed class DevicePage : UserControl, IModuleAware, IDisposable, IAsyncD
 
     private void RefreshDriverControls()
     {
-        DriverSetupButton.IsVisible = PlatformServices.CanBindWinUsb;
-        if (!PlatformServices.CanBindWinUsb) OpenDeviceManagerButton.Content = "系统信息";
+        DriverSetupButton.IsVisible = PlatformServices.SupportsUsbDriverBinding;
+        OpenDeviceManagerButton.Content = PlatformServices.DeviceManagerButtonLabel;
     }
 
     private void StartOperation(Func<Task> operation)

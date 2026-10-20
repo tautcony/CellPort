@@ -10,6 +10,8 @@
     <Project Path="src/CellPort.Core/CellPort.Core.csproj" />
     <Project Path="src/CellPort.Platform.Linux/CellPort.Platform.Linux.csproj" />
     <Project Path="src/CellPort.Platform.MacOS/CellPort.Platform.MacOS.csproj" />
+    <Project Path="src/CellPort.Platform.Abstractions/CellPort.Platform.Abstractions.csproj" />
+    <Project Path="src/CellPort.Platform.Runtime/CellPort.Platform.Runtime.csproj" />
     <Project Path="src/CellPort.Platform.Windows/CellPort.Platform.Windows.csproj" />
     <Project Path="src/CellPort.Transport.Serial/CellPort.Transport.Serial.csproj" />
   </Folder>

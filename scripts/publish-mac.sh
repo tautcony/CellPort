@@ -25,9 +25,24 @@ dotnet publish "$repo_dir/src/CellPort.App/CellPort.App.csproj" \
 # The direct USB AT transport loads this adjacent dylib via NativeLibrary.
 libusb_arch=arm64
 if [[ "$rid" == osx-x64 ]]; then libusb_arch=x86_64; fi
+brew_bin="$(command -v brew || true)"
+if [[ "$libusb_arch" == arm64 && -x /opt/homebrew/bin/brew ]]; then
+  brew_bin=/opt/homebrew/bin/brew
+elif [[ "$libusb_arch" == x86_64 && -x /usr/local/bin/brew ]]; then
+  brew_bin=/usr/local/bin/brew
+fi
+brew_prefix=""
+if [[ -n "$brew_bin" ]]; then
+  brew_prefix="$($brew_bin --prefix libusb 2>/dev/null || true)"
+fi
 libusb_source=""
 for candidate in \
-  "$(brew --prefix libusb 2>/dev/null || true)/lib/libusb-1.0.dylib" \
+  "$brew_prefix/lib/libusb-1.0.dylib" \
+  "$brew_prefix/lib/libusb-1.0.0.dylib" \
+  /opt/homebrew/opt/libusb/lib/libusb-1.0.dylib \
+  /opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib \
+  /usr/local/opt/libusb/lib/libusb-1.0.dylib \
+  /usr/local/opt/libusb/lib/libusb-1.0.0.dylib \
   /opt/homebrew/lib/libusb-1.0.dylib \
   /usr/local/lib/libusb-1.0.dylib; do
   if [[ -f "$candidate" ]] && lipo -verify_arch "$libusb_arch" "$candidate" >/dev/null 2>&1; then

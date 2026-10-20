@@ -13,7 +13,6 @@
     <Product>CellPort Module Manager</Product>
     <ApplicationIcon Condition="'$(TargetFramework)' == 'net10.0-windows'">..\..\docs\cellport.ico</ApplicationIcon>
     <ApplicationManifest Condition="'$(TargetFramework)' == 'net10.0-windows'">app.manifest</ApplicationManifest>
-    <DefineConstants Condition="'$(TargetFramework)' == 'net10.0-windows'">$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.4" />
@@ -23,10 +22,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CellPort.Core\CellPort.Core.csproj" />
+    <ProjectReference Include="..\CellPort.Platform.Runtime\CellPort.Platform.Runtime.csproj" />
     <ProjectReference Include="..\CellPort.Transport.Serial\CellPort.Transport.Serial.csproj" />
     <ProjectReference Include="..\CellPort.Audio.Core\CellPort.Audio.Core.csproj" />
-    <ProjectReference Include="..\CellPort.Platform.MacOS\CellPort.Platform.MacOS.csproj" Condition="'$(TargetFramework)' != 'net10.0-windows'" />
-    <ProjectReference Include="..\CellPort.Platform.Windows\CellPort.Platform.Windows.csproj" Condition="'$(TargetFramework)' == 'net10.0-windows'" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CellPort.App.Tests" />

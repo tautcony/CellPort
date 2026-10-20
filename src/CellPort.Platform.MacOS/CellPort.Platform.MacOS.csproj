@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../CellPort.Core/CellPort.Core.csproj" />
+    <ProjectReference Include="../CellPort.Platform.Abstractions/CellPort.Platform.Abstractions.csproj" />
     <ProjectReference Include="../CellPort.Transport.Serial/CellPort.Transport.Serial.csproj" />
     <InternalsVisibleTo Include="CellPort.Platform.MacOS.Tests" />
   </ItemGroup>

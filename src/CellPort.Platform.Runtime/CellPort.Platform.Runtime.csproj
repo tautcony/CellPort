@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(OS)' == 'Windows_NT' or '$(EnableWindowsTargeting)' == 'true'">net10.0;net10.0-windows</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CellPort.Platform.Abstractions\CellPort.Platform.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <ProjectReference Include="..\CellPort.Platform.Windows\CellPort.Platform.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows'">
+    <ProjectReference Include="..\CellPort.Platform.MacOS\CellPort.Platform.MacOS.csproj" />
+    <ProjectReference Include="..\CellPort.Platform.Linux\CellPort.Platform.Linux.csproj" />
+  </ItemGroup>
+</Project>
