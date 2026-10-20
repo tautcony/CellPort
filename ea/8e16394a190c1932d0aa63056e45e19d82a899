@@ -1,0 +1,22 @@
+.github/workflows/platform-checks.yml
+  s_270a2e06a37363::t_e0a80701a159a4 62-68
+scripts/publish-mac.sh
+  s_270a2e06a37363::t_9dc7c337138a4c 34-35,37-38
+  s_270a2e06a37363::t_0b30c13a772830 41,49-51,58-78,81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ea8e16394a190c1932d0aa63056e45e19d82a899",
+  "prompts": {},
+  "sessions": {
+    "s_270a2e06a37363": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1584a-eb6c-7b02-ab48-8ee8b9615978",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "TautCony <i@tautcony.xyz>"
+    }
+  }
+}
